@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "job-search-assistant"
+version = "0.2.0"
+description = "Evidence-based, explainable job application prioritization"
+requires-python = ">=3.11"
+dependencies = ["openpyxl>=3.1.5,<4", "beautifulsoup4>=4.12,<5"]
+
+[project.scripts]
+job-search-assistant = "job_search_assistant.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

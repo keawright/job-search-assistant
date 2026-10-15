@@ -1,0 +1,11 @@
+{
+  "target_roles": ["Engineering Manager", "Senior Engineering Manager", "Director of Engineering", "Technical Program Manager", "Program Manager"],
+  "home_city": "Halifax",
+  "country": "Canada",
+  "remote_countries": ["Canada"],
+  "acceptable_office_cities": ["Halifax"],
+  "prefer_leadership": true,
+  "willing_to_relocate": false,
+  "work_authorizations": [],
+  "unavailable_work_authorizations": []
+}
