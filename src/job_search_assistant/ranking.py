@@ -59,6 +59,10 @@ def _evaluate(job, candidate, policy, as_of):
         fit = _NAMES[band]
         reasons.append("Regular hands-on coding reduces fit by one band under the leadership preference.")
     location, location_reason = _location(job, candidate)
+    if job.assume_location_acceptable and location != "eligible":
+        flags.append("Location needs checking; assessed and ranked assuming location will be acceptable. " + location_reason)
+        location = "assumed acceptable"
+        location_reason = "Location assumed acceptable at user request; actual eligibility remains unverified."
     reasons.append(location_reason)
     if location == "unknown":
         flags.append("Confirm location/work authorization before applying.")
@@ -76,8 +80,12 @@ def _evaluate(job, candidate, policy, as_of):
             reasons.append(f"Posting is {age} days old (over {policy.old_posting_days}).")
     else:
         flags.append("Posting date unknown; no posting-age boost.")
-    if job.deadline:
-        remaining = (job.deadline - as_of).days
+    deadline = job.deadline
+    if deadline and deadline < as_of and job.verification == "open" and job.last_verified >= deadline:
+        flags.append("Recorded deadline superseded by later confirmation that applications are accepted; original deadline retained.")
+        deadline = None
+    if deadline:
+        remaining = (deadline - as_of).days
         if remaining < 0:
             flags.append("Recorded deadline has passed; verify availability before applying.")
         elif remaining <= policy.approaching_deadline_days:
@@ -85,7 +93,7 @@ def _evaluate(job, candidate, policy, as_of):
             reasons.append(f"Deadline is in {remaining} days (within {policy.approaching_deadline_days}).")
     else:
         flags.append("Deadline unknown; no deadline boost.")
-    excluded = job.verification == "closed" or location == "ineligible" or fit == "unsuitable" or bool(job.deadline and job.deadline < as_of)
+    excluded = job.verification == "closed" or location == "ineligible" or fit == "unsuitable" or bool(deadline and deadline < as_of)
     if job.verification == "closed":
         reasons.append("Confirmed closed: excluded from the application queue.")
     if excluded or band == 0:
@@ -95,9 +103,10 @@ def _evaluate(job, candidate, policy, as_of):
     if job.manual_priority is not None:
         reasons.append(f"Manual queue position requested: {job.manual_priority}; eligibility and status still apply.")
     ranked = RankedJob(job, fit, location, None, tuple(reasons), tuple(flags), policy.version, as_of)
-    # Confirmed location first, assessed before unassessed, then bounded urgency.
-    key = (location != "eligible", not bool(known), -(band + bool(urgency)), -urgency,
-           "unknown" in values, -band, job.deadline or date.max, job.id)
+    # Fit drives recommendations. Confirmed ineligibility still excludes a job;
+    # unknown location stays flagged and breaks comparable-fit ties only.
+    key = (not bool(known), -(band + bool(urgency)), -urgency,
+           "unknown" in values, -band, location not in ("eligible", "assumed acceptable"), job.deadline or date.max, job.id)
     return ranked, key, excluded
 
 

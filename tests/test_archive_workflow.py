@@ -39,7 +39,7 @@ def test_rejected_last_even_after_review_and_with_invalid_job(tmp_path):
     make_source(source)
     update_workbook(source, output, [], as_of=date(2026, 10, 15), offline=True)
     _, result = records(output)
-    assert [r["Assistant section"] for r in result] == ["Applied", "Outstanding", "Review", "Rejected", "Rejected"]
+    assert [r["Assistant section"] for r in result] == ["Interviewing", "Applied", "Outstanding", "Rejected", "Rejected"]
     assert result[-1]["Application status"] == " rejected "
     assert result[-1]["Outcome Reason"] == "Manual exclusion"
 
@@ -55,8 +55,8 @@ def test_cli_archives_old_files_and_exports_one_current_tab(tmp_path, monkeypatc
     assert (tmp_path / "archive" / "intermediate.xlsx").read_bytes() == b"Old version bytes"
     names, result = records(tmp_path / "next.xlsx")
     assert names == ["Assistant queue"]
-    assert result[0]["Application status"] == "Applied"
-    assert result[0]["Applied Date"] == "2026-10-14"
+    assert result[1]["Application status"] == "Applied"
+    assert result[1]["Applied Date"] == "2026-10-14"
     # Manually update the current file and let the next command select it.
     wb = load_workbook(tmp_path / "next.xlsx")
     ws = wb.active

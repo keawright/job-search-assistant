@@ -3,7 +3,8 @@
 Only source code, tests, documentation, synthetic examples, and GitHub Actions
 configuration belong in this repository. Spreadsheets are local application data,
 including the seed workbook, generated queues, and archive copies. They must not
-be committed. Personal URL lists, private snapshots, candidate data, credentials,
+be committed. Resume documents (PDF/Word) and the local TASK.md handoff are
+also blocked. Personal URL lists, private snapshots, candidate data, credentials,
 environment files, database files, and local environments are excluded too.
 
 Before each commit:

@@ -1,5 +1,14 @@
 # Architecture
 
+Current extension: `assessment.py` implements optional Codex CLI and direct
+OpenAI Responses providers, grounded-quotation validation, private input-keyed
+assessment reuse, and safe failure handling. CLI loads private resume/configuration
+and passes the service into the workbook adapter. Explicit manual ratings retain
+precedence; the pure ranking library still makes no network calls. Policy 1.1
+makes contextual fit primary; unknown location is a tie-breaker. The historical
+design notes below describe the earlier implementation; see automatic_assessment.md
+for current runtime behavior.
+
 The first iteration is a pure Python library, independent of HTTP, databases,
 spreadsheets, and AI vendors. It takes existing jobs, preferences, a policy, and an
 evaluation date, and returns ranked records with reasons. There are no side effects.
@@ -81,4 +90,5 @@ creation and byte verification. Earlier tabs remain in those archived files.
 An ambiguous current file selection is refused; callers can identify the latest
 edited workbook explicitly. The low-level workbook function can still retain all
 tabs; the CLI offers `--keep-history-tabs` for formula dependencies. Excel output
-orders Applied, Outstanding, Review, Rejected so rejected jobs are always last.
+orders Interviewing, Applied, Outstanding, Review, Closed, Rejected, and
+Elapsed-Rejected. Interviewing retains input order and stays above Applied.

@@ -12,8 +12,9 @@ that reads posting URLs and exports an updated Excel queue. It preserves the inp
 workbook and original tracking columns. Older workbooks and their tabs go in
 `archive/`; the current workbook normally contains one Assistant queue tab. New facts use structured
 posting metadata; contextual fit remains evidence-backed human input.
-There are no AI calls, application API keys, or UI. Personal workbooks and
-snapshots are ignored by Git.
+Optional automatic resume-based assessment now uses your signed-in Codex CLI;
+a direct OpenAI API provider is also available. Personal resumes, assessments,
+workbooks and snapshots stay in ignored private files. There is no UI.
 
 ## Quick start (PowerShell)
 
@@ -29,7 +30,7 @@ python -m venv .venv
 On macOS/Linux use `.venv/bin/python` instead. No activation step is needed.
 The example uses fictional companies and `example.com` URLs; it never fetches them.
 The older good-fit opportunity ranks before the newer strong-fit opportunity,
-while Applied remains first and a confirmed closed job stays outside the queue.
+while Interviewing precedes Applied and a confirmed closed job stays outside the queue.
 
 ## Update your workbook from URLs
 
@@ -42,14 +43,47 @@ Add one employer posting URL per line to the local `new_urls.txt` file. Then run
 
 The command reads the sole current `.xlsx` file in this folder, writes a new
 timestamped workbook, then moves older workbooks into `archive/`. Open
-**Assistant queue** in the new file. Applied comes first, then Outstanding, Review,
+**Assistant queue** in the new file. Interviewing comes first, then Applied, Outstanding, Review,
 and **Rejected at the very bottom**. Existing output names are refused.
 New jobs have extracted facts and review
-flags; they remain unscored until contextual assessment inputs are supplied.
+flags; configured automatic assessment compares their role evidence with your
+resume. Unchanged saved assessments are reused. See
+[automatic assessment and login setup](docs/automatic_assessment.md).
+**Apply order** is recalculated from evidence-backed contextual assessment inputs.
+Assessed actionable jobs receive numbers and are sorted by that number; entirely
+unassessed jobs show **Needs assessment**, with no numeric Assistant priority.
+Review-blocked jobs are not given a numeric application recommendation. The
+**Assistant assessment status** column distinguishes Complete, Partial, and
+Needs assessment. Interviewing jobs appear first, followed by Applied; Closed and Rejected remain at the bottom and display `-` for Apply order.
+On every update (including offline), Applied jobs at least one calendar month past
+their Applied Date become **Elapsed-Rejected** and move to the very bottom with
+`-` for Apply order. Month-end anniversaries use the last day of the next month.
+This is an aging convention, not confirmation from the employer. Missing,
+unreadable, or future application dates keep Applied and receive a review flag.
+Dates, notes, and outcome fields are preserved; Interviewing and other statuses
+are not aged automatically.
 Save and close your current workbook before running again. Manual Applied/Rejected
 statuses, dates, notes, and outcomes are retained exactly. If several workbooks
 are present, use `--workbook` to identify the latest edited file; no age-based guess
-is made. `--offline` disables URL reads; `--refresh` also fetches existing postings.
+is made. Normal updates also check existing **Not Applied** and blank-status jobs.
+An explicit visible closure notice changes Application status to **Closed**;
+Closed jobs appear above Rejected and are not checked again. Other statuses are
+never fetched or changed. Access failures leave the status unchanged and appear
+in **Assistant fetch issue** and **Assistant review flags**. The check date and
+closure evidence have dedicated Assistant columns. Missing metadata, a passed
+deadline, and failed requests do not prove closure. `--offline` disables URL reads;
+`--refresh` remains accepted for compatibility with earlier commands.
+
+Incomplete LinkedIn pages now trigger a bounded public web search using the company,
+role, and location parsed from the page title. A single alternative with matching
+structured company/title and visible location is saved in **Assistant alternate URL**
+and used for extraction and later checks. The original posting URL is retained.
+**Assistant discovery notes** explains the result; ambiguous, blocked, or mismatched
+searches remain for review. Unknown-company placeholders and LinkedIn page titles
+can be repaired on existing unapplied rows; other manual fields are preserved.
+The search uses DuckDuckGo's public HTML page without an API key and may be blocked
+or change format. Matching does not establish that the source is official or that
+the role is open. Offline runs never search.
 
 See [the workbook guide](docs/updating_workbooks.md) for editable assessment columns,
 field ownership, candidate preferences, duplicate handling, and fetch limitations.
@@ -86,7 +120,8 @@ has been supplied. See `examples/synthetic_jobs.py` for complete assessments.
   strengths, evidenced gaps, and any evidenced regular coding requirement.
   A known contextual rating requires evidence comparing requirements with
   professional accomplishments. Target roles and strengths guide this human
-  assessment; the engine does not infer semantic fit from titles or keywords.
+  assessment. The configured model provider compares role evidence and resume
+  accomplishments; no keyword-count fit score is used.
 - `RankingPolicy`: version and configurable posting-age/deadline windows.
 - `RankingResult`: Applied, actionable Outstanding, Rejected, and separate Excluded
   records. `ordered` returns the first three sections in that order. **Always
@@ -108,7 +143,7 @@ deadline is held for verification without claiming the posting is closed.
 Manual queue positions cannot change application status or bypass an exclusion.
 Duplicate IDs or normalized URLs raise an error for explicit reconciliation.
 
-URL reading cannot verify that a source is official or that a job is still open.
+URL reading cannot verify that a source is official or guarantee a job is still open.
 Users must supply truthful verification dates and source evidence. Prefer employer
 career pages. Full fetched HTML and extracted text are retained in private snapshots.
 
@@ -142,8 +177,24 @@ See [architecture](docs/architecture.md). Next phases:
 2. Add a React/TypeScript table and editing interface.
 3. Extend URL compatibility with targeted ATS adapters and availability verification.
 4. Add CSV export and richer spreadsheet reconciliation where needed.
-5. Add optional evidence-validated AI assessment providers and evaluation fixtures.
+5. Expand evaluation coverage and live compatibility for the implemented assessment providers.
 
 GitHub Actions runs the tests and repository privacy guard on pushes and pull
 requests. Future credentials belong in backend environment
 variables or CI secret storage, never in browser bundles or committed files.
+
+
+Additional links for the same job can go in **Other source links**, separated by
+spaces or newlines. If the main posting cannot provide a structured description,
+online updates try these links and use the first matching employer/role posting.
+See [supplied alternate links](docs/updating_workbooks.md#supplied-alternate-posting-links).
+
+
+For fresh AI assessments of selected input-sheet Excel rows, use
+`update --reassess-rows 98,101,103-105`. Other jobs reuse matching assessments
+without new AI calls. See [selected reassessment](docs/automatic_assessment.md#reassess-selected-rows).
+
+
+Use `update --reassess-needed` to retry jobs whose saved **Apply order** is
+**Needs assessment** or **Needs review**, regardless of row position. Other jobs
+reuse cached assessments; protected statuses and existing review holds remain.

@@ -1,4 +1,4 @@
-# Prioritization policy 1.0
+# Prioritization policy 1.1
 
 All rules are deterministic for the same inputs, policy, and explicit `as_of` date.
 Dates are calendar dates. Unknown values remain unknown. These ordinal rules are
@@ -6,8 +6,9 @@ reviewable design decisions, not inferred probabilities.
 
 ## Status and exclusions
 
-1. Applied precedes actionable Outstanding, which precedes Rejected.
-2. Preserve input order within Applied and Rejected; do not rewrite user status.
+1. In workbook output, Interviewing precedes Applied, then actionable Outstanding,
+   Review, Closed, Rejected, and Elapsed-Rejected.
+2. Preserve input order within Interviewing, Applied and Rejected; do not rewrite user status.
 3. Exclude only Outstanding records that are confirmed closed, location-ineligible,
    assessed unsuitable, have a fundamental gap, or have a recorded passed deadline.
 4. Return exclusions separately with their original status and explanations.
@@ -73,16 +74,18 @@ unsuitable=0. These are sorting levels, not public numerical fit scores.
 
 Sort actionable Outstanding by:
 
-1. Confirmed location eligibility before unknown eligibility.
-2. At least one known contextual criterion before entirely unassessed records.
-3. Fit band plus bounded urgency, descending.
-4. Urgency level, descending (deadline before age before none).
-5. Complete assessments before partial assessments.
-6. Original fit band, descending; then earliest known deadline; then stable ID.
+1. At least one known contextual criterion before entirely unassessed records.
+2. Fit band plus bounded urgency, descending.
+3. Urgency level, descending (deadline before age before none).
+4. Complete assessments before partial assessments.
+5. Original fit band, descending.
+6. Confirmed location eligibility before unknown eligibility for otherwise comparable fits.
+7. Earliest known deadline; then stable ID.
 
 Example: older good fit (2+1) precedes new strong fit (3+0), because urgency
 breaks the equal effective band. Urgent stretch (1+1) stays below new strong (3).
-Unknown location cannot outrank confirmed eligibility through urgency alone.
+Unknown location is flagged for verification; it does not by itself push a strong
+fit below a weak one. Confirmed location ineligibility still excludes the job.
 An older posting may already be stale, so age urgency is paired with availability
 review flags rather than an invented closure prediction.
 

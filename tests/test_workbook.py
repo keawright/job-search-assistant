@@ -123,7 +123,7 @@ def test_failed_fetch_remains_visible_and_not_closed(workbook, tmp_path):
         raise FetchError("HTTP 403")
     output = tmp_path / "failed.xlsx"
     result = update_workbook(workbook, output, ["https://example.com/blocked"], as_of=TODAY, fetcher=failed)
-    assert result.fetch_failures == 1
+    assert result.fetch_failures == 2
     wb, records = rows(output)
     try:
         new = next(r for r in records if r["Job posting (URL)"] == "https://example.com/blocked")
@@ -137,7 +137,7 @@ def test_unrecognized_status_and_duplicates_retained_for_review(workbook, tmp_pa
     wb = load_workbook(workbook)
     ws = wb["Updated priorities"]
     ws.append([None, "Duplicate", "PM", "https://example.com/job/1", "Not applied"])
-    ws.append([None, "Custom status", "PM", "https://example.com/custom", "Interviewing"])
+    ws.append([None, "Custom status", "PM", "https://example.com/custom", "Offer pending"])
     wb.save(workbook)
     wb.close()
     output = tmp_path / "review.xlsx"
@@ -147,7 +147,7 @@ def test_unrecognized_status_and_duplicates_retained_for_review(workbook, tmp_pa
     try:
         assert len(records) == 6
         custom = next(r for r in records if r["Company"] == "Custom status")
-        assert custom["Application status"] == "Interviewing"
+        assert custom["Application status"] == "Offer pending"
         assert custom["Assistant section"] == "Review"
     finally:
         wb.close()

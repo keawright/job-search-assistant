@@ -100,6 +100,7 @@ class Job:
     assessment: Assessment = field(default_factory=Assessment)
     manual_priority: int | None = None
     tracking: dict[str, object] = field(default_factory=dict)
+    assume_location_acceptable: bool = False
 
     def __post_init__(self):
         if not self.id.strip() or not self.company.strip() or not self.title.strip():
@@ -116,7 +117,7 @@ class Job:
 
 @dataclass(frozen=True)
 class RankingPolicy:
-    version: str = "1.0"
+    version: str = "1.1"
     old_posting_days: int = 14
     approaching_deadline_days: int = 7
 

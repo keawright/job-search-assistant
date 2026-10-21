@@ -29,10 +29,10 @@ The default output is a new timestamped workbook in the same folder. You can set
 older sibling workbooks move into `archive/` without overwriting previous backups.
 Archived inputs are refused to prevent accidentally reverting your latest edits.
 
-Open **Assistant queue** in the new workbook. The order is Applied, Outstanding,
+Open **Assistant queue** in the new workbook. The order is Interviewing, Applied, Outstanding,
 Review, and **Rejected last**. Filter on Assistant section as needed. Outstanding is ordered by Assistant
 priority. Review contains exclusions and input problems, with the original status
-retained. Applied and Rejected always stay in their respective sections, including
+retained. Interviewing, Applied and Rejected always stay in their respective sections, including
 records without URLs. Inspect review flags on every new opportunity.
 
 ## What URL reading does
@@ -124,11 +124,30 @@ current output and original input before retrying with an explicit source.
   Advanced Excel objects unsupported by openpyxl may not round-trip in regenerated
   tabs; the archived original remains the reference copy. Macro workbooks are
   not accepted. The supplied seed has no embedded drawing objects.
-- **User columns:** statuses, notes, dates, outcomes, existing Apply order, assessment
+- **User columns:** statuses, notes, dates, outcomes, assessment
   inputs, and custom columns are copied. Cell comments and hyperlinks are carried
   into the new queue. Relative formulas are translated when their row moves;
-  complex cross-sheet formulas should be checked in Excel. Old Apply order is
-  historical; the current order is Assistant priority.
+  complex cross-sheet formulas should be checked in Excel.
+- **Apply order:** regenerated as consecutive numbers only for assessed actionable
+  Not Applied (including blank/Outstanding) jobs and used to sort those rows.
+  Entirely unassessed jobs display Needs assessment with no numeric Assistant
+  priority; other review-blocked jobs receive no numeric recommendation either.
+  Assistant assessment status distinguishes Complete, Partial, and Needs assessment.
+  Legacy Why this fits/Gaps notes remain available as reassessment evidence but
+  are not automatically converted to ratings. Interviewing jobs stay first, followed by Applied; Closed
+  and Rejected stay at the bottom.
+  Applied, Closed, Rejected, and other custom statuses display `-`. Use Manual
+  priority to request a different position for an actionable job.
+- **Applied aging:** every update, including offline, changes Applied to
+  Elapsed-Rejected on or after its one-calendar-month anniversary. Applied Date,
+  Date applied, or Application date supplies the date. Excel dates, ISO dates,
+  and explicit month-name dates such as Oct-9-2026 are supported; ambiguous numeric
+  dates are not guessed. If the next month lacks that day, use its last day.
+  Missing, unreadable, and future dates retain Applied with a review flag.
+  Elapsed-Rejected rows go below Rejected with a dash for Apply order; they are
+  never fetched or searched. The explanation identifies this as a tracking
+  assumption rather than an employer-confirmed rejection. All dates, notes,
+  outcome fields, and annotations are retained. Other statuses are not aged.
 - **Assistant columns:** generated facts, explanations, sections, priority, and
   flags are recomputed. Edit user columns rather than Assistant columns.
 - **Dates:** known user Deadline/Posted date values take precedence over extracted
@@ -147,15 +166,43 @@ current output and original input before retrying with an explicit source.
   name alone is never a deduplication key. Cross-site aliases are not always
   detectable and require review.
 
-By default only new unique URLs are fetched. `--refresh` also reads existing
-posting URLs but does not replace user-owned company/title, tracking, assessment,
-or location fields. `--offline` disables all fetching, even with `--refresh`.
+By default new unique URLs and existing Not Applied or blank-status jobs are fetched.
+Explicit visible closure notices change Application status to Closed. Closed jobs
+are placed above Rejected and are never automatically fetched again. Applied,
+Rejected, Interviewing, and all other statuses are left alone, even with `--refresh`.
+Access failures leave the original status unchanged; see Assistant fetch issue and
+Assistant review flags. Assistant availability checked on records the attempt date;
+Assistant closure evidence records the notice and resolved URL. Failed requests,
+missing metadata, and elapsed deadlines alone never mark a job Closed.
+`--refresh` is now a compatibility option. Fetching existing posting URLs preserves
+manual tracking, assessment, and location fields. `--offline` disables all fetching,
+including alternative-link searches, even with `--refresh`.
+
+For incomplete LinkedIn pages, a recognizable page title supplies company, role,
+and location for a DuckDuckGo HTML search. At most three result pages are fetched;
+exact normalized company/title metadata and visible location must match. A single
+matching page is used; multiple matches are left for review. Source authority and
+current availability remain unverified. Search snippets alone never close a job.
+Assistant alternate URL stores the new source without replacing the original
+posting URL; later checks use the alternate directly. Assistant discovery notes
+and review flags explain blocked, empty, or ambiguous searches. Unknown company
+placeholders and generated LinkedIn page titles may be repaired on existing rows,
+while manual company/title values remain intact. Search identity and both original
+and alternate fetched HTML are retained privately for traceability. If no company
+and role can be extracted (for example a blocked new URL), no broad guess is made.
+The search endpoint can be blocked or change format; this is a best-effort fallback.
 Choose a different source tab with `--sheet "Application priorities"`; otherwise
 the default is Assistant queue, Updated priorities, then Application priorities.
 If the job-table headers differ substantially, the command stops for explicit
 mapping rather than guessing. Unrecognized statuses are preserved for review.
 
 ## Candidate preferences
+
+Automatic resume-based assessments can now be generated through signed-in Codex
+and reused from private saved results. See [setup and behavior](automatic_assessment.md).
+Manual criterion ratings take precedence. The generated assessment columns show
+source, date, summary, resume/role quotations, strengths, gaps, uncertainties and
+issues. Missing or failed assessment never receives a numeric Apply order.
 
 Copy `examples/preferences.json` to `data/private/preferences.json`, edit it, and
 pass `--preferences data/private/preferences.json`. Only specified fields override
@@ -173,4 +220,52 @@ annotation preservation, repeat runs, human overrides, stale legacy exclusions,
 duplicate reconciliation, failed reads, redirect address checks, private addresses,
 response-size limits, structured extraction, and formula-injection protection.
 No tests fetch real employer pages or require API keys. Real-site compatibility
-varies; JavaScript-based ATS adapters and optional AI assessment remain future work.
+varies; JavaScript-based ATS adapters remain future work. Optional Codex/API
+assessment is implemented and tested with synthetic model responses; live inference
+still requires a working login and network access in the user's normal terminal.
+
+
+## Supplied alternate posting links
+
+Put additional URLs for the same job in **Other source links** (or
+**Other source links (URL)**), separated by spaces or newlines. A cell hyperlink
+is also supported. When the primary posting fails or lacks a structured job
+with a description, online updates try up to five distinct supplied links in
+order before LinkedIn discovery. The first posting with structured employer and
+role matching the known job identity and a description becomes the saved
+**Assistant alternate URL**, used on subsequent updates. Original posting URLs
+and manual tracking fields are preserved. Explicit closure notices on the main
+page are retained rather than replaced by an alternate.
+
+Different employers/roles, ambiguous posting pages, and unreadable links are
+skipped with notes in **Assistant discovery notes**. Unknown job identities need
+manual clarification before an alternate can be matched safely. Location,
+source authority, and current vacancy still require verification. Offline updates
+and protected statuses (including Interviewing) never fetch alternate links.
+
+
+## Location assumptions
+
+At the user's request, workbook assessments and application ordering assume
+location will be acceptable. Earlier Halifax/location holds no longer prevent
+fit assessment. Actual location evidence and original notes remain intact;
+**Assistant review flags** warns that location needs checking, and
+**Assistant location eligibility** says **assumed acceptable** where applicable.
+This is a ranking assumption, not verified permission to work remotely or an
+employer waiver. Availability, duplicate, and insufficient-role-evidence holds
+still apply. The standalone ranking library retains its normal location checks
+unless a job explicitly enables this assumption.
+
+
+## CGI future opportunities and renewed availability
+
+CGI Future opportunity rows are assessed and ranked at the user's request,
+with a warning that a current staffed vacancy is not confirmed. Original notes
+remain unchanged. Other legacy closed/unavailable holds remain in place.
+
+After confirmation that applications are accepted, set Verification status to
+`open` and Last verified to the confirmation date. Confirmation on or after an
+old deadline supersedes that deadline for ranking; the date remains preserved
+with a review flag and no deadline urgency boost. Record the confirmation source
+in Availability confirmation or personal notes. A secondary URL alone does not
+establish open availability. Future/invalid verification dates remain rejected.

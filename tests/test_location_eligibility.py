@@ -34,3 +34,17 @@ def test_unknown_authorization_does_not_hide_distant_office(make_job, candidate,
 def test_candidate_can_configure_acceptable_offices(make_job, candidate, today):
     job = make_job(location=Location(arrangement="hybrid", office_city="Toronto", evidence="Toronto twice weekly"))
     assert prioritize([job], replace(candidate, acceptable_office_cities=("Toronto",)), as_of=today).outstanding[0].location_eligibility == "eligible"
+
+
+def test_stronger_assessment_outranks_weaker_fit_with_unknown_location(make_job, candidate, today):
+    strong = make_job('strong',location=Location())
+    weaker = make_job('weaker',fit='stretch')
+    result = prioritize([weaker,strong],candidate,as_of=today)
+    assert [row.job.id for row in result.outstanding] == ['strong','weaker']
+    assert result.outstanding[0].location_eligibility == 'unknown'
+    assert any('Confirm location' in flag for flag in result.outstanding[0].review_flags)
+
+
+def test_confirmed_location_breaks_otherwise_equal_fit_tie(make_job, candidate, today):
+    result = prioritize([make_job('a',location=Location()),make_job('z')],candidate,as_of=today)
+    assert [row.job.id for row in result.outstanding] == ['z','a']

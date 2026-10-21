@@ -5,6 +5,7 @@ from datetime import date
 import http.client
 import ipaddress
 import json
+import re
 import socket
 import ssl
 import time
@@ -34,6 +35,24 @@ def normalize_url(url: str) -> str:
 class Page:
     url: str
     html: str
+
+
+def closure_evidence(html: str) -> str | None:
+    """Accept explicit visible closure notices, never missing metadata or dates."""
+    soup = BeautifulSoup(html, "html.parser")
+    for element in soup(["script", "style", "nav", "header", "footer", "noscript"]):
+        element.decompose()
+    scope = soup.find("main") or soup.find("article") or soup
+    notices = re.compile(
+        r"(?:this|the) (?:job|position|role|vacancy|job posting|job opening) "
+        r"(?:is no longer available|is no longer open|has been closed|has been filled|is closed|is filled)"
+        r"|(?:we are |we're )?no longer accepting applications(?: for this (?:job|position|role))?"
+        r"|this job posting has expired", re.I)
+    for element in scope.find_all(["h1", "h2", "h3", "p", "div", "span"]):
+        text = " ".join(element.get_text(" ", strip=True).split())
+        if len(text) <= 400 and notices.search(text):
+            return text
+    return None
 
 
 def _public_addresses(host: str, port: int) -> list[str]:

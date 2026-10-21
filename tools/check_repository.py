@@ -10,9 +10,9 @@ import subprocess
 import sys
 from urllib.parse import urlsplit
 
-PRIVATE_SUFFIXES = {".xlsx", ".xls", ".xlsm", ".xlsb", ".ods", ".csv", ".tsv", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx"}
+PRIVATE_SUFFIXES = {".pdf", ".doc", ".docx", ".xlsx", ".xls", ".xlsm", ".xlsb", ".ods", ".csv", ".tsv", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx"}
 PRIVATE_PARTS = {"archive", ".job-search-assistant-private", ".venv", "__pycache__", ".pytest_cache", ".ssh", ".aws", ".codex", ".agents", ".tools"}
-PRIVATE_NAMES = {"new_urls.txt", ".git-credentials", ".netrc", ".npmrc", ".pypirc", "credentials.json"}
+PRIVATE_NAMES = {"task.md", "new_urls.txt", ".git-credentials", ".netrc", ".npmrc", ".pypirc", "credentials.json"}
 PATTERNS = {
     "private key": re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"),
     "GitHub token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
