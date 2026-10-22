@@ -231,10 +231,25 @@ class CodexAssessor:
 
 
 class AssessmentService:
-    def __init__(self, folder, resume, provider=None, *, max_calls=20, reassess=False, allow_network=True):
+    def __init__(self, folder, resume, provider=None, *, max_calls=None, max_refresh_calls=20, reassess=False, allow_network=True):
         self.folder, self.resume, self.provider = Path(folder), resume, provider
         self.max_calls, self.reassess, self.allow_network = max_calls, reassess, allow_network
-        self.calls = self.reused = self.created = 0
+        self.max_refresh_calls = max_refresh_calls
+        self.calls = self.reused = self.created = self.refresh_calls = 0
+        self._assessed_ids = None
+
+    def previously_assessed(self, job):
+        if self._assessed_ids is None:
+            self._assessed_ids = set()
+            for path in (self.folder / "assessments").glob("*.json"):
+                try:
+                    entry = json.loads(path.read_text(encoding="utf-8"))
+                    assessment = entry["assessment"]
+                    if any(assessment.get(key, {}).get("rating") in ("strong", "good", "stretch", "unsuitable") for key in CRITERIA):
+                        self._assessed_ids.add(entry["job_id"])
+                except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                    continue
+        return job.id in self._assessed_ids
 
     def save(self, job, candidate, payload, *, source, assessed_on):
         validate_assessment(payload, self.resume, job_evidence(job))
@@ -265,11 +280,16 @@ class AssessmentService:
             raise AssessmentError("No matching saved assessment; AI requests are disabled for this run")
         if self.provider is None:
             raise AssessmentError("Automatic API assessment needs OPENAI_API_KEY; no matching saved assessment")
-        if self.calls >= self.max_calls:
+        if self.max_calls is not None and self.calls >= self.max_calls:
             raise AssessmentError("AI assessment call limit reached; rerun to assess remaining jobs")
+        refresh = self.previously_assessed(job)
+        if refresh and self.refresh_calls >= self.max_refresh_calls:
+            raise AssessmentError("Changed/previously assessed job refresh limit reached; saved assessment history retained")
         if len(evidence_text(job_evidence(job))) < 100:
             raise AssessmentError("Not enough role evidence for a substantive assessment")
         self.calls += 1
+        if refresh:
+            self.refresh_calls += 1
         payload = self.provider.assess(self.resume, job_evidence(job), candidate)
         entry = self.save(job, candidate, payload, source=f"{self.provider.name} ({self.provider.model or 'configured default'})", assessed_on=as_of)
         self.created += 1
@@ -298,9 +318,14 @@ def load_service(folder, *, offline=False, no_ai=False, resume_path=None, model=
     resume = path.read_text(encoding="utf-8-sig").strip()
     if len(resume) < 100:
         raise AssessmentError("Resume text is too short for assessment")
-    limit = max_calls if max_calls is not None else config.get("max_calls", 20)
-    if type(limit) is not int or not 0 <= limit <= 200:
+    limit = max_calls
+    if limit is not None and (type(limit) is not int or not 0 <= limit <= 200):
         raise AssessmentError("AI call limit must be an integer from 0 to 200")
+    # Legacy max_calls now supplies only the refresh allowance, so existing
+    # configurations do not leave new/unassessed jobs capped at twenty.
+    refresh_limit = config.get("max_refresh_calls", config.get("max_calls", 20))
+    if type(refresh_limit) is not int or not 0 <= refresh_limit <= 200:
+        raise AssessmentError("AI refresh call limit must be an integer from 0 to 200")
     provider_name = config.get("provider", "codex")
     if provider_name not in ("codex", "openai"):
         raise AssessmentError("Assessment provider must be codex or openai")
@@ -314,4 +339,4 @@ def load_service(folder, *, offline=False, no_ai=False, resume_path=None, model=
             provider = CodexAssessor(folder / PRIVATE, selected_model)
         elif key:
             provider = OpenAIAssessor(key, selected_model or "gpt-5.4-mini")
-    return AssessmentService(folder / PRIVATE, resume, provider, max_calls=limit, reassess=reassess, allow_network=not offline and not no_ai)
+    return AssessmentService(folder / PRIVATE, resume, provider, max_calls=limit, max_refresh_calls=refresh_limit, reassess=reassess, allow_network=not offline and not no_ai)

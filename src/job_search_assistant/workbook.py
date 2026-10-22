@@ -57,6 +57,7 @@ class UpdateSummary:
     fetch_failures: int
     outstanding: int
     review: int
+    assessment_issues: dict[str, int] = field(default_factory=dict)
 
 
 def _column(headers, key):
@@ -392,7 +393,7 @@ def _write_text(cell, value):
 def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                     sheet: str | None = None, candidate: CandidatePreferences | None = None,
                     offline: bool = False, refresh: bool = False, compact: bool = False, fetcher=fetch_page,
-                    assessment_service=None, reassess_rows: set[int] | None = None, reassess_needed: bool = False) -> UpdateSummary:
+                    assessment_service=None, reassess_rows: set[int] | None = None, reassess_needed: bool = False, progress=None) -> UpdateSummary:
     source, output = Path(source).resolve(), Path(output).resolve()
     if source.suffix.lower() != ".xlsx" or output.suffix.lower() != ".xlsx":
         raise ValueError("Input and output must be .xlsx workbooks (macros are not supported)")
@@ -478,7 +479,10 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                 seen[normalize_url(resolved)] = record
         # Validate one record at a time; malformed user data stays visible.
         valid, ids, job_urls = [], set(), set()
-        for record in records:
+        assessment_issues = {}
+        # Keep records in source order for output/status stability, but give newly
+        # added jobs first use of the assessment budget.
+        for record in sorted(records, key=lambda record: record.row is not None):
             if str(_value(record, "status") or "").strip().casefold() == "interviewing":
                 continue
             try:
@@ -495,12 +499,19 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                         record.values["Assistant assessment source"] = "Manual assessment inputs (preserved)"
                     else:
                         try:
+                            if progress:
+                                kind = "New job" if record.row is None else "Existing job"
+                                progress(f"{kind} assessment: {job.company} - {job.title}")
+                            created_before = assessment_service.created
                             if reassess_rows is None:
                                 assessment, entry = assessment_service.resolve(job, candidate, as_of, offline=offline)
                             else:
                                 selected = record.row in reassess_rows
                                 assessment, entry = assessment_service.resolve(job, candidate, as_of,
                                     offline=not selected, force=selected)
+                            if progress:
+                                outcome = "completed" if assessment_service.created > created_before else "saved result reused"
+                                progress(f"Assessment {outcome}.")
                             job = replace(job, assessment=assessment)
                             record.values.update({"Assistant assessment source": entry["source"], "Assistant assessed on": entry["assessed_on"],
                                 "Assistant assessment summary": entry["assessment"]["summary"],
@@ -513,6 +524,11 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                         except (OSError, ValueError, TypeError, KeyError):
                             # No raw provider/transport details or credentials in workbook output.
                             record.values["Assistant assessment issue"] = "Assessment unavailable: missing key/cache, call limit, insufficient evidence, or invalid response. Run with --no-ai to use saved results; otherwise check AI configuration."
+                    issue = record.values.get("Assistant assessment issue")
+                    if issue:
+                        assessment_issues[issue] = assessment_issues.get(issue, 0) + 1
+                        if progress:
+                            progress(f"Assessment unavailable: {issue}")
                 # Validate date-dependent invariants before batch ranking.
                 prioritize([job], candidate, as_of=as_of)
                 ids.add(job.id)
@@ -656,6 +672,6 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                 output.unlink(missing_ok=True)
                 raise
         review_count = sum(r.values["Assistant section"] == "Review" for r in records)
-        return UpdateSummary(output, source_sheet_name, imported, added, skipped, failures, len(result.outstanding), review_count)
+        return UpdateSummary(output, source_sheet_name, imported, added, skipped, failures, len(result.outstanding), review_count, assessment_issues)
     finally:
         wb.close()

@@ -66,7 +66,7 @@ def main(argv=None):
     update.add_argument("--preferences", type=Path, help="Private JSON candidate preferences")
     update.add_argument("--resume", type=Path, help="Private UTF-8 resume text (.txt/.md); otherwise use saved AI configuration")
     update.add_argument("--ai-model", help="Assessment model override; Codex otherwise uses its default")
-    update.add_argument("--max-ai-calls", type=int, help="Maximum new assessment requests in this run (default 20)")
+    update.add_argument("--max-ai-calls", type=int, help="Optional cap on all AI requests in this run (new/unassessed jobs uncapped by default)")
     update.add_argument("--no-ai", action="store_true", help="Reuse matching saved assessments without new AI requests")
     update.add_argument("--reassess", action="store_true", help="Request fresh automatic assessments instead of reusing saved results; manual inputs stay intact")
     update.add_argument("--offline", action="store_true", help="Import and rank without making network requests")
@@ -96,7 +96,8 @@ def main(argv=None):
                                model=args.ai_model, max_calls=args.max_ai_calls, reassess=args.reassess)
         result = update_workbook(source, output, urls, as_of=args.as_of, sheet=args.sheet,
                                  candidate=_candidate(args.preferences), offline=args.offline, refresh=args.refresh,
-                                 compact=not args.keep_history_tabs, assessment_service=service, reassess_rows=args.reassess_rows, reassess_needed=args.reassess_needed)
+                                 compact=not args.keep_history_tabs, assessment_service=service, reassess_rows=args.reassess_rows, reassess_needed=args.reassess_needed,
+                                 progress=lambda message: print(message, flush=True))
     except (OSError, ValueError, TypeError, KeyError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
@@ -113,6 +114,8 @@ def main(argv=None):
     print(f"Archived {len(archived)} older workbooks in {result.output.parent / 'archive'}.")
     if service is not None:
         print(f"Contextual assessments: {service.created} new; {service.reused} reused; {service.calls} AI requests.")
+        for issue, count in result.assessment_issues.items():
+            print(f"Assessments unavailable ({count}): {issue}")
         if service.provider is None and not args.offline and not args.no_ai:
             print("OPENAI_API_KEY is not configured: matching saved assessments were used; other jobs remain Needs assessment.")
     print("Open Assistant queue. Unknown fit needs contextual assessment; a readable URL does not confirm an open vacancy.")

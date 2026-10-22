@@ -264,3 +264,84 @@ def test_reassess_needed_follows_saved_status_after_rows_move(tmp_path,payload,r
     update_workbook(source,output,[],as_of=TODAY,fetcher=fetch,assessment_service=service,reassess_needed=True)
     assert set(provider.urls)=={f'https://example.com/{name}' for name in ('assess','review','typo')}
     assert len(provider.urls)==3
+
+
+@pytest.mark.parametrize("limit", [1, 2])
+def test_new_jobs_assessed_first_and_existing_cache_reused(tmp_path, payload, limit):
+    source, output = tmp_path/'input.xlsx', tmp_path/'output.xlsx'
+    wb=Workbook(); ws=wb.active; ws.title='Assistant queue'
+    ws.append(['Company','Position title','Job posting','Application status','Assistant description','My notes'])
+    for name in ['Missing', 'Cached']:
+        ws.append([name,'Engineering Manager',f'https://example.com/{name}','Not applied',DESCRIPTION,'Keep'])
+    wb.save(source)
+    class Fake:
+        name, model = 'Synthetic', 'test'
+        def __init__(self): self.urls=[]
+        def assess(self, resume, context, candidate):
+            self.urls.append(context['url']); return deepcopy(payload)
+    provider=Fake()
+    service=AssessmentService(tmp_path/'private',RESUME,provider,max_calls=limit)
+    from job_search_assistant.workbook import _read_records, _make_job
+    _,_,records=_read_records(wb,None)
+    service.save(_make_job(records[1],wb.epoch),CandidatePreferences(),deepcopy(payload),source='Previous',assessed_on=TODAY)
+    wb.close()
+    from job_search_assistant.ingestion import Page, FetchError
+    def fetch(url):
+        if url != 'https://example.com/new':
+            raise FetchError('Blocked; keep saved description')
+        data={'@type':'JobPosting','title':'Engineering Manager',
+              'hiringOrganization':{'name':'New'},'description':DESCRIPTION}
+        return Page(url, '<script type="application/ld+json">'+json.dumps(data)+'</script>')
+    messages=[]
+    result=update_workbook(source,output,['https://example.com/new'],as_of=TODAY,
+                           fetcher=fetch,assessment_service=service,progress=messages.append)
+    assert provider.urls == ['https://example.com/new'] + (['https://example.com/Missing'] if limit == 2 else [])
+    assert service.reused == 1
+    assert service.created == limit
+    assert sum(result.assessment_issues.values()) == (1 if limit == 1 else 0)
+    assert any('New job assessment: New' in message for message in messages)
+    assert any('saved result reused' in message for message in messages)
+    assert any('call limit' in message for message in messages) == (limit == 1)
+    wb=load_workbook(output); data=list(wb['Assistant queue'].values)
+    rows={r[0]:dict(zip(data[0],r)) for r in data[1:]}; wb.close()
+    assert rows['New']['Assistant assessment status'] == 'Complete'
+    assert rows['Cached']['Assistant assessment status'] == 'Complete'
+    assert rows['Missing']['My notes'] == 'Keep'
+    assert rows['Missing']['Application status'] == 'Not applied'
+    assert rows['Missing']['Assistant assessment status'] == ('Complete' if limit == 2 else 'Needs assessment')
+
+
+def test_default_initial_assessments_exceed_twenty_and_refresh_budget_is_separate(tmp_path, job, payload):
+    class Fake:
+        name, model = 'Synthetic', 'test'
+        def assess(self, *args): return deepcopy(payload)
+    candidate=CandidatePreferences()
+    service=AssessmentService(tmp_path, RESUME, Fake(), max_refresh_calls=1)
+    for i in range(23):
+        service.resolve(replace(job,id=f'new-{i}',url=f'https://example.com/{i}'),candidate,TODAY)
+    assert service.created == 23
+    # A new run finds prior successful assessments by stable ID, even with changed URLs.
+    service=AssessmentService(tmp_path, RESUME, Fake(), max_refresh_calls=1)
+    first=replace(job,id='new-0',url='https://example.com/changed0')
+    service.resolve(first,candidate,TODAY)
+    assert service.refresh_calls == 1
+    with pytest.raises(AssessmentError, match='refresh limit'):
+        service.resolve(replace(job,id='new-1',url='https://example.com/changed1'),candidate,TODAY)
+    # Cache reuse and initial assessments continue after refresh exhaustion.
+    service.resolve(first,candidate,TODAY)
+    service.resolve(replace(job,id='another-new'),candidate,TODAY)
+    assert service.reused == 1
+    assert service.created == 2
+
+
+def test_legacy_config_does_not_cap_initial_assessments(tmp_path):
+    private=tmp_path/'.job-search-assistant-private'; private.mkdir()
+    (private/'resume.txt').write_text(RESUME)
+    config={'resume_path':'.job-search-assistant-private/resume.txt','max_calls':1}
+    path=private/'assessment-config.json';path.write_text(json.dumps(config))
+    service=load_service(tmp_path)
+    assert service.max_calls is None
+    assert service.max_refresh_calls == 1
+    assert load_service(tmp_path,max_calls=3).max_calls == 3
+    config['max_refresh_calls']=2;path.write_text(json.dumps(config))
+    assert load_service(tmp_path).max_refresh_calls == 2

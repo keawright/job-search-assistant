@@ -31,7 +31,7 @@ Keep an extracted UTF-8 resume in the private folder and configure the private
   "provider": "codex",
   "resume_path": ".job-search-assistant-private/resume.txt",
   "model": null,
-  "max_calls": 20
+  "max_refresh_calls": 20
 }
 ```
 
@@ -51,13 +51,29 @@ inputs when configured:
 .\.venv\Scripts\python.exe -m job_search_assistant update --urls-file new_urls.txt
 ```
 
+Newly added jobs are assessed before existing jobs. Normal updates attempt every
+new or still-unassessed job without a default total call cutoff. Matching saved
+assessments are reused. Jobs with a previous saved assessment whose inputs changed
+share a separate allowance of 20 refresh attempts per run, configured with
+`max_refresh_calls`. Failed attempts count against allowances. Previous assessment
+history is identified by the stable job ID, including earlier cache revisions.
+Manual ratings and protected application statuses remain intact.
+
+An explicit `--max-ai-calls` caps all AI requests, including new jobs and refreshes;
+it does not increase the separate refresh allowance. For existing configurations,
+legacy `max_calls` is used as the refresh allowance only; `max_refresh_calls` takes
+precedence. No private configuration edit is needed to enable uncapped initial
+assessments. The CLI reports assessment progress and summarizes unavailable results.
+Missing evidence, provider failures, explicit limits, or account limits may still
+leave jobs needing assessment.
+
 Useful options:
 
 - `--offline`: no posting, search, or AI network requests; use matching saved assessments.
 - `--no-ai`: posting checks still run; no new AI requests, but saved results are reused.
 - `--reassess`: request fresh assessments instead of reusing saved results. Earlier
   saved revisions are retained. Explicit manual ratings are still preserved.
-- `--max-ai-calls 5`: cap new model requests in this run (default 20, maximum 200).
+- `--max-ai-calls 5`: cap all model requests in this run (optional, maximum 200).
   The cap includes failed attempts. Additional jobs remain Needs assessment until
   a later run. Codex calls use account limits; API calls use API billing.
 - `--ai-model MODEL`: optional model override. The Codex provider otherwise uses
@@ -157,6 +173,8 @@ holds or missing evidence, so some rows can still require review afterward.
 Do not combine with `--reassess-rows`, `--reassess`, `--offline`, or `--no-ai`.
 Posting checks run only for selected existing jobs. AI call limits, workbook
 creation and archival still apply.
-The default call limit is 20; optionally increase it using `--max-ai-calls`.
+New/unassessed jobs have no default total call cutoff; previously assessed jobs
+share the configured refresh allowance (default 20). Use `--max-ai-calls` to set
+an explicit total cap.
 The default input is the sole current top-level workbook, including your saved
 manual edits. Save and close Excel first. Add `--workbook` if multiple files exist.
