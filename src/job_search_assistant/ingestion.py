@@ -45,10 +45,10 @@ def closure_evidence(html: str) -> str | None:
     scope = soup.find("main") or soup.find("article") or soup
     notices = re.compile(
         r"(?:this|the) (?:job|position|role|vacancy|job posting|job opening) "
-        r"(?:is no longer available|is no longer open|has been closed|has been filled|is closed|is filled)"
+        r"(?:is no longer available|is no longer open|has been closed|has been filled|has expired|is closed|is filled)"
         r"|(?:we are |we're )?no longer accepting applications(?: for this (?:job|position|role))?"
-        r"|this job posting has expired", re.I)
-    for element in scope.find_all(["h1", "h2", "h3", "p", "div", "span"]):
+        r"|this job posting has expired|the job you are trying to apply for is no longer available", re.I)
+    for element in scope.find_all(["h1", "h2", "h3", "p", "div", "span", "button"]):
         text = " ".join(element.get_text(" ", strip=True).split())
         if len(text) <= 400 and notices.search(text):
             return text
@@ -77,7 +77,7 @@ class _PinnedHTTPS(http.client.HTTPSConnection):
             raise
 
 
-def fetch_page(url: str, *, timeout: float = 20, max_bytes: int = 2_000_000) -> Page:
+def fetch_page(url: str, *, timeout: float = 20, max_bytes: int = 2_000_000, content_types=("text/html", "application/xhtml+xml"), redirect_check=None) -> Page:
     """Validate every redirect and pin the connection to a checked public IP.
 
     HTTPS retains hostname certificate validation. No cookies, authentication,
@@ -101,7 +101,7 @@ def fetch_page(url: str, *, timeout: float = 20, max_bytes: int = 2_000_000) -> 
             conn._public_ip = addresses[0]
             try:
                 target = urlunsplit(("", "", parts.path or "/", parts.query, ""))
-                conn.request("GET", target, headers={"User-Agent": "JobSearchAssistant/0.2", "Accept": "text/html,application/xhtml+xml", "Accept-Encoding": "identity"})
+                conn.request("GET", target, headers={"User-Agent": "JobSearchAssistant/0.2", "Accept": ",".join(content_types), "Accept-Encoding": "identity"})
                 response = conn.getresponse()
                 if response.status in (301, 302, 303, 307, 308):
                     location = response.getheader("Location")
@@ -110,12 +110,14 @@ def fetch_page(url: str, *, timeout: float = 20, max_bytes: int = 2_000_000) -> 
                     destination = urljoin(current, location)
                     if parts.scheme.lower() == "https" and urlsplit(destination).scheme.lower() != "https":
                         raise FetchError("Refused HTTPS downgrade redirect")
+                    if redirect_check is not None:
+                        redirect_check(destination)
                     current = destination
                     continue
                 if response.status != 200:
                     raise FetchError(f"HTTP {response.status}; availability remains unverified")
                 content_type = response.getheader("Content-Type", "").split(";", 1)[0].strip().lower()
-                if content_type not in ("text/html", "application/xhtml+xml"):
+                if content_type not in content_types:
                     raise FetchError("Expected an HTML page")
                 if response.getheader("Content-Encoding", "identity").lower() != "identity":
                     raise FetchError("Compressed responses are not supported")
@@ -190,7 +192,7 @@ def _postings(value):
 def extract_posting(html: str) -> ExtractedPosting:
     soup = BeautifulSoup(html, "html.parser")
     postings, flags = [], []
-    for script in soup.find_all("script", type="application/ld+json"):
+    for script in soup.find_all("script", type=("application/ld+json", "application/json")):
         try:
             postings.extend(_postings(json.loads(script.get_text())))
         except (ValueError, TypeError):
@@ -202,9 +204,19 @@ def extract_posting(html: str) -> ExtractedPosting:
     if not postings:
         for element in soup(["script", "style", "nav", "header", "footer", "noscript"]):
             element.decompose()
-        main = soup.find("main") or soup.find("article")
+        # Scope to known job-body containers before falling back to page-wide text.
+        # These selectors cover public LinkedIn, Lever, Greenhouse and
+        # SuccessFactors pages without executing scripts or guessing requirements.
+        bodies = soup.select(".description__text, .posting-page .content, #job_description, "
+                             ".job__description, .job-description, .jobdescription, [itemprop='description']")
+        if len(bodies) == 1:
+            main = bodies[0]
+            flags.append("Scoped to a public job-description container; employer identity still requires review.")
+        else:
+            main = soup.find("main") or soup.find("article")
         text = main.get_text(" ", strip=True) if main else None
-        title = soup.title.get_text(" ", strip=True) if soup.title else None
+        heading = soup.find("h1")
+        title = heading.get_text(" ", strip=True) if heading else soup.title.get_text(" ", strip=True) if soup.title else None
         return ExtractedPosting(None, title, text, None, None, Location(), tuple(flags) + ("No JobPosting metadata; fallback page text requires review and may be a login or careers page.",))
     data = postings[0]
     organization = data.get("hiringOrganization", {})

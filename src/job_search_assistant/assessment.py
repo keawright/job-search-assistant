@@ -26,6 +26,10 @@ class AssessmentError(ValueError):
     pass
 
 
+class QuotationError(AssessmentError):
+    """A model response needs an exact-evidence quotation correction."""
+
+
 class AssessmentProvider(Protocol):
     def assess(self, job: Job, candidate: CandidatePreferences) -> Assessment:
         """Return contextual judgments with evidence, explicit gaps, and unknowns."""
@@ -106,7 +110,7 @@ def validate_assessment(payload, resume, context):
             raise AssessmentError("Invalid criterion rating or rationale")
         if rating != "unknown":
             if not _check_quote(item["resume_quote"], resume) or not _check_quote(item["job_quote"], source):
-                raise AssessmentError("Assessment quotation is unsupported by the supplied resume or role evidence")
+                raise QuotationError(f"Assessment quotation is unsupported by the supplied resume or role evidence ({key}); copy exact excerpts")
             evidence[key] = f'Resume: {item["resume_quote"]}\nRole: {item["job_quote"]}\nAssessment: {item["rationale"]}'
         ratings[key] = rating
     for key in ("strengths", "uncertainties"):
@@ -121,13 +125,13 @@ def validate_assessment(payload, resume, context):
         if not isinstance(item, dict) or set(item) != {"description", "severity", "resume_quote", "job_quote", "rationale"} or not all(isinstance(v, str) for v in item.values()):
             raise AssessmentError("Invalid gap fields")
         if not item["rationale"].strip() or not _check_quote(item["resume_quote"], resume) or not _check_quote(item["job_quote"], source):
-            raise AssessmentError("Gap quotation is unsupported")
+            raise QuotationError("Gap quotation is unsupported")
         gaps.append(Gap(item["description"], item["severity"], f'Resume: {item["resume_quote"]}; role: {item["job_quote"]}; {item["rationale"]}'))
     coding, quote = payload["regular_hands_on_coding"], payload["coding_quote"]
     if coding is not None and type(coding) is not bool:
         raise AssessmentError("Coding expectation must be boolean or null")
     if not isinstance(quote, str) or (coding is not None and not _check_quote(quote, source)):
-        raise AssessmentError("Coding quotation is unsupported")
+        raise QuotationError("Coding quotation is unsupported")
     return Assessment(**ratings, evidence=evidence, strengths=tuple(payload["strengths"]), gaps=tuple(gaps),
                       regular_hands_on_coding=coding, coding_evidence=quote or None, assessor="AI contextual review")
 
@@ -199,8 +203,9 @@ def codex_command():
 class CodexAssessor:
     name = "Codex login"
 
-    def __init__(self, folder, model=None, runner=subprocess.run):
+    def __init__(self, folder, model=None, runner=subprocess.run, *, schema=SCHEMA, instructions=INSTRUCTIONS, validator=validate_assessment):
         self.folder, self.model, self.runner = Path(folder), model, runner
+        self.schema, self.instructions, self.validator = schema, instructions, validator
 
     def assess(self, resume, context, candidate):
         runs = self.folder / "codex-runs"
@@ -208,14 +213,14 @@ class CodexAssessor:
         with tempfile.TemporaryDirectory(prefix="assessment-", dir=runs) as directory:
             folder = Path(directory)
             schema, output = folder / "schema.json", folder / "result.json"
-            schema.write_text(json.dumps(SCHEMA), encoding="utf-8")
+            schema.write_text(json.dumps(self.schema), encoding="utf-8")
             command = codex_command() + ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only",
                        "--skip-git-repo-check", "--color", "never", "-c", 'approval_policy="never"',
                        "-c", 'web_search="disabled"', "-c", "features.shell_tool=false", "-c", "features.multi_agent=false",
                        "--output-schema", str(schema.resolve()), "--output-last-message", str(output.resolve()), "-"]
             if self.model:
                 command[-1:-1] = ["--model", self.model]
-            prompt = INSTRUCTIONS + "\nUse only the data below. Do not use tools or read files.\n" + json.dumps(
+            prompt = self.instructions + "\nUse only the data below. Do not use tools or read files.\n" + json.dumps(
                 {"resume": resume, "candidate_preferences": asdict(candidate), "job": context}, ensure_ascii=False)
             try:
                 result = self.runner(command, input=prompt, text=True, encoding="utf-8", capture_output=True,
@@ -226,7 +231,7 @@ class CodexAssessor:
                 payload = json.loads(output.read_text(encoding="utf-8"))
             except (OSError, subprocess.TimeoutExpired, ValueError):
                 raise AssessmentError("Codex assessment did not return valid output; check CLI login and connectivity") from None
-        validate_assessment(payload, resume, context)
+        self.validator(payload, resume, context)
         return payload
 
 
@@ -276,24 +281,55 @@ class AssessmentService:
             rating = validate_assessment(entry["assessment"], self.resume, job_evidence(job))
             self.reused += 1
             return rating, entry
-        if not self.allow_network or offline:
-            raise AssessmentError("No matching saved assessment; AI requests are disabled for this run")
-        if self.provider is None:
-            raise AssessmentError("Automatic API assessment needs OPENAI_API_KEY; no matching saved assessment")
-        if self.max_calls is not None and self.calls >= self.max_calls:
-            raise AssessmentError("AI assessment call limit reached; rerun to assess remaining jobs")
-        refresh = self.previously_assessed(job)
-        if refresh and self.refresh_calls >= self.max_refresh_calls:
-            raise AssessmentError("Changed/previously assessed job refresh limit reached; saved assessment history retained")
-        if len(evidence_text(job_evidence(job))) < 100:
-            raise AssessmentError("Not enough role evidence for a substantive assessment")
-        self.calls += 1
-        if refresh:
-            self.refresh_calls += 1
-        payload = self.provider.assess(self.resume, job_evidence(job), candidate)
-        entry = self.save(job, candidate, payload, source=f"{self.provider.name} ({self.provider.model or 'configured default'})", assessed_on=as_of)
-        self.created += 1
-        return validate_assessment(payload, self.resume, job_evidence(job)), entry
+        cached = None
+        if path.exists():
+            entry = json.loads(path.read_text(encoding="utf-8"))
+            if entry.get("key") == key and entry.get("version") == VERSION:
+                cached = (validate_assessment(entry["assessment"], self.resume, job_evidence(job)), entry)
+
+        def retain_or_raise(error):
+            if cached is None:
+                raise error
+            self.reused += 1
+            rating, entry = cached
+            return rating, {**entry, "refresh_issue": str(error)}
+
+        try:
+            if not self.allow_network or offline:
+                raise AssessmentError("No matching saved assessment; AI requests are disabled for this run")
+            if self.provider is None:
+                raise AssessmentError("Automatic API assessment needs OPENAI_API_KEY; no matching saved assessment")
+            refresh = self.previously_assessed(job)
+            context = job_evidence(job)
+            if len(evidence_text(context)) < 100:
+                raise AssessmentError("Not enough role evidence for a substantive assessment")
+            for attempt in range(2):
+                if self.max_calls is not None and self.calls >= self.max_calls:
+                    raise AssessmentError("AI assessment call limit reached; rerun to assess remaining jobs")
+                if refresh and self.refresh_calls >= self.max_refresh_calls:
+                    raise AssessmentError("Changed/previously assessed job refresh limit reached; saved assessment history retained")
+                self.calls += 1
+                if refresh:
+                    self.refresh_calls += 1
+                try:
+                    payload = self.provider.assess(self.resume, context, candidate)
+                    rating = validate_assessment(payload, self.resume, job_evidence(job))
+                    break
+                except QuotationError as exc:
+                    if attempt:
+                        raise
+                    context = {**context, "quotation_correction": str(exc) +
+                               "; copy exact substrings from the original resume and job evidence. Do not paraphrase quotes."}
+            if cached is not None and all(getattr(rating, c) == "unknown" for c in CRITERIA) and any(
+                    getattr(cached[0], c) != "unknown" for c in CRITERIA):
+                raise AssessmentError("Refresh returned unknown fit; previous assessment still validates against unchanged inputs")
+            entry = self.save(job, candidate, payload, source=f"{self.provider.name} ({self.provider.model or 'configured default'})", assessed_on=as_of)
+            self.created += 1
+            return rating, entry
+        except AssessmentError as exc:
+            return retain_or_raise(exc)
+        except (OSError, ValueError, TypeError, KeyError):
+            return retain_or_raise(AssessmentError("Assessment refresh failed; no valid replacement returned"))
 
 
 def load_service(folder, *, offline=False, no_ai=False, resume_path=None, model=None, max_calls=None, reassess=False):

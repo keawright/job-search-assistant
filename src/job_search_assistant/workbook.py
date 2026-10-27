@@ -33,7 +33,8 @@ GENERATED_COLUMNS = ["Apply order", "Assistant ID", "Assistant section", "Assist
                      "Assistant availability checked on", "Assistant closure evidence",
                      "Assistant alternate URL", "Assistant discovery notes", "Assistant discovery identity", "Assistant assessment status",
                      "Assistant assessment source", "Assistant assessed on", "Assistant assessment summary", "Assistant assessment evidence",
-                     "Assistant assessment strengths", "Assistant assessment gaps", "Assistant assessment uncertainties", "Assistant assessment issue"]
+                     "Assistant assessment strengths", "Assistant assessment gaps", "Assistant assessment uncertainties", "Assistant assessment issue", "Assistant assessment outcome",
+                     "Assistant previous assessment summary", "Assistant previous assessment date", "Assistant latest fetch snapshot"]
 ALIASES = {"company": ("Company",), "title": ("Position title", "Position", "Title"),
            "url": ("Job posting (URL)", "Job posting", "Job posting URL"), "status": ("Application status",),
            "deadline": ("Deadline", "Application deadline"), "posting_date": ("Posted date", "Posting date")}
@@ -359,11 +360,27 @@ def _fetch(record, url, snapshots, as_of, fetcher, searcher=search_postings):
         with snapshot.open("x", encoding="utf-8") as stream:
             json.dump(payload, stream, ensure_ascii=False, default=str, indent=2)
     v = record.values
+    v["Assistant latest fetch snapshot"] = str(snapshot.resolve())
+    evidence_columns = ("Assistant description", "Assistant extracted posting date", "Assistant extracted deadline",
+                        "Assistant extracted location", "Assistant snapshot", "Assistant resolved URL", "Assistant fetched on")
+    previous_evidence = {key: v.get(key) for key in evidence_columns}
+    description = extracted.description or ""
+    role_wording = len(description) >= 100 and bool(re.search(
+        r"responsibilit|qualifications|requirements|you(?:'|\u2019)ll|what you|lead\s|deliver\s|manage\s",
+        description, re.I))
+    scoped_body = any(flag.startswith("Scoped to a public job-description") for flag in extracted.flags)
+    preserve_evidence = bool(v.get("Assistant description")
+                             and not ((_usable_posting(extracted) or scoped_body) and role_wording)
+                             and (len(description) < len(v.get("Assistant description") or "") or not role_wording)
+                             and not closure_evidence(page.html))
     v.update({"Assistant fetched on": as_of, "Assistant resolved URL": page.url,
               "Assistant extracted posting date": extracted.posting_date, "Assistant extracted deadline": extracted.deadline,
               "Assistant extracted location": json.dumps(asdict(extracted.location), ensure_ascii=False),
               "Assistant description": (extracted.description or "")[:30000], "Assistant snapshot": str(snapshot.resolve()),
               "Assistant extraction flags": "\n".join(extracted.flags), "Assistant fetch issue": None})
+    if preserve_evidence:
+        v.update(previous_evidence)
+        v["Assistant extraction flags"] = "\n".join(extracted.flags) + "\nLatest page lacks a complete role posting; retained earlier role evidence with its original source and fetch date. Current availability remains unverified."
     if eligible:
         evidence = closure_evidence(page.html)
         if evidence:
@@ -483,7 +500,7 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
         # Keep records in source order for output/status stability, but give newly
         # added jobs first use of the assessment budget.
         for record in sorted(records, key=lambda record: record.row is not None):
-            if str(_value(record, "status") or "").strip().casefold() == "interviewing":
+            if str(_value(record, "status") or "").strip().casefold() in ("interview", "interviewing", "applied", "closed", "rejected", "elapsed-rejected"):
                 continue
             try:
                 job = _make_job(record, wb.epoch)
@@ -492,6 +509,9 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                     raise ValueError("Duplicate existing ID/URL; retained separately for manual reconciliation")
                 raw_status = str(_value(record, "status") or "").strip().casefold()
                 if assessment_service is not None and raw_status in ("", "not applied"):
+                    if record.values.get("Assistant assessment summary"):
+                        record.values["Assistant previous assessment summary"] = record.values["Assistant assessment summary"]
+                        record.values["Assistant previous assessment date"] = record.values.get("Assistant assessed on")
                     for label in ("Assistant assessment source", "Assistant assessed on", "Assistant assessment summary", "Assistant assessment evidence",
                                   "Assistant assessment strengths", "Assistant assessment gaps", "Assistant assessment uncertainties", "Assistant assessment issue"):
                         record.values[label] = None
@@ -512,6 +532,8 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                             if progress:
                                 outcome = "completed" if assessment_service.created > created_before else "saved result reused"
                                 progress(f"Assessment {outcome}.")
+                            if entry.get("refresh_issue"):
+                                record.values["Assistant assessment issue"] = "Saved assessment retained after refresh failed: " + entry["refresh_issue"]
                             job = replace(job, assessment=assessment)
                             record.values.update({"Assistant assessment source": entry["source"], "Assistant assessed on": entry["assessed_on"],
                                 "Assistant assessment summary": entry["assessment"]["summary"],
@@ -549,6 +571,17 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
             v = record.values
             ranked = by_id.get(record.job.id) if record.job else None
             raw_status = str(_value(record, "status") or "").strip().casefold()
+            protected_section = {"interview": "Interviewing", "interviewing": "Interviewing",
+                                 "applied": "Applied", "closed": "Closed", "rejected": "Rejected",
+                                 "elapsed-rejected": "Elapsed-Rejected"}.get(raw_status)
+            if protected_section:
+                # Only status placement and aging apply to rows outside the active queue.
+                # Preserve their saved assessment and avoid new ranking/review output.
+                v["Assistant section"] = protected_section
+                v["Assistant priority"] = None
+                if raw_status == "elapsed-rejected":
+                    v["Assistant priority reasons"] = "Application aged at least one calendar month: Elapsed-Rejected is a tracking assumption, not a confirmed employer rejection."
+                continue
             section = {"applied": "Applied", "rejected": "Rejected"}.get(raw_status, "Review")
             if ranked:
                 section = "Review" if ranked.job.id in excluded_ids else {"applied": "Applied", "outstanding": "Outstanding", "rejected": "Rejected"}[ranked.job.status]
@@ -571,6 +604,13 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
             known_criteria = sum(getattr(record.job.assessment, key) != "unknown" for key in
                                  ("leadership_fit", "technical_fit", "career_alignment", "opportunity_quality")) if record.job else 0
             v["Assistant assessment status"] = ("Complete" if known_criteria == 4 else "Partial" if known_criteria else "Needs assessment")
+            issue = str(v.get("Assistant assessment issue") or "")
+            v["Assistant assessment outcome"] = (
+                "Saved assessment retained; refresh failed" if issue.startswith("Saved assessment retained") else
+                "Description needed" if "Not enough role evidence" in issue or (
+                    not known_criteria and not issue and v.get("Assistant assessment summary")) else
+                "Assessment needed" if not known_criteria and not issue else
+                "Assessment failed" if issue else "Assessed")
             if raw_status == "elapsed-rejected":
                 v["Assistant priority reasons"] = "Application aged at least one calendar month: Elapsed-Rejected is a tracking assumption, not a confirmed employer rejection."
         source_order = {id(record): i for i, record in enumerate(records)}

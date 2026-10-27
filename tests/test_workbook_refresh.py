@@ -285,3 +285,79 @@ def test_cgi_future_opportunity_can_be_assessed_without_claiming_open(tmp_path):
     assert 'Future opportunity' in row['Assistant review flags']
     assert 'not confirmed' in row['Assistant review flags']
     assert row['Vacancy status']=='Future opportunity - no staffed vacancy'
+
+def test_protected_rows_preserve_assessments_and_relative_order(tmp_path):
+    original, output, again = (tmp_path / name for name in ('input.xlsx', 'output.xlsx', 'again.xlsx'))
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Assistant queue'
+    saved = {'Assistant assessment status': 'Complete', 'Assistant overall fit': 'good',
+             'Assistant assessment summary': 'Saved assessment', 'Assistant evaluated on': '2026-01-01',
+             'Assistant review flags': 'Saved flags'}
+    ws.append(['Company', 'Position title', 'Job posting', 'Application status', *saved])
+    entries = [('Rejected B', 'Rejected'), ('Applied B', 'Applied'), ('Interview B', 'Interview'),
+               ('Closed B', 'Closed'), ('Applied A', 'Applied'), ('Interview A', 'Interviewing'),
+               ('Rejected A', 'Rejected'), ('Closed A', 'Closed')]
+    for name, status in entries:
+        ws.append([name, 'EM', None, status, *saved.values()])
+    wb.save(original)
+    wb.close()
+    class ForbiddenAssessment:
+        def resolve(self, *args, **kwargs):
+            raise AssertionError('Protected row assessed')
+    def forbidden_fetch(url):
+        raise AssertionError('Protected row fetched')
+    for source_path, target in [(original, output), (output, again)]:
+        update_workbook(source_path, target, [], as_of=TODAY, fetcher=forbidden_fetch,
+                        assessment_service=ForbiddenAssessment())
+        wb = load_workbook(target)
+        data = list(wb['Assistant queue'].values)
+        rows = [dict(zip(data[0], row)) for row in data[1:]]
+        wb.close()
+        assert [r['Company'] for r in rows] == ['Interview B', 'Interview A', 'Applied B', 'Applied A',
+                                               'Closed B', 'Closed A', 'Rejected B', 'Rejected A']
+        for row in rows:
+            assert row['Apply order'] == '-'
+            for key, value in saved.items():
+                assert row[key] == value
+
+
+def test_generic_refresh_preserves_description_and_provenance(tmp_path):
+    original, output = tmp_path / "input.xlsx", tmp_path / "output.xlsx"
+    wb = Workbook(); ws = wb.active
+    ws.append(["Company", "Position title", "Job posting", "Application status", "Assistant description",
+               "Assistant extracted posting date", "Assistant snapshot", "Assistant fetched on"])
+    ws.title = "Assistant queue"
+    description = "Lead the platform team and deliver reliable services. " * 8
+    ws.append(["Example", "Manager", "https://example.com/role", "Not applied", description,
+               "2026-09-01", "earlier-snapshot.json", "2026-10-01"])
+    wb.save(original); wb.close()
+    update_workbook(original, output, [], as_of=TODAY,
+                    fetcher=lambda url: Page(url, "<main>Welcome to our careers page</main>"))
+    values = get_values(output)
+    assert values["Assistant description"] == description
+    assert values["Assistant snapshot"] == "earlier-snapshot.json"
+    assert values["Assistant fetched on"] == "2026-10-01"
+    assert values["Assistant extracted posting date"] == "2026-09-01"
+    assert "retained earlier role evidence" in values["Assistant review flags"]
+    assert values["Application status"] == "Not applied"
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_refresh_accepts_scoped_duties_but_not_long_generic_text(tmp_path, scoped):
+    original, output = tmp_path / "input.xlsx", tmp_path / "output.xlsx"
+    wb = Workbook(); ws = wb.active; ws.title = "Assistant queue"
+    ws.append(["Company", "Position title", "Job posting", "Application status", "Assistant description"])
+    earlier = "Lead engineers and deliver platform services. " * 8
+    ws.append(["Example", "Manager", "https://example.com/role", "Not applied", earlier])
+    wb.save(original); wb.close()
+    if scoped:
+        current = "Lead the product team and manage reliable delivery. " * 3
+        html = '<h1>Manager</h1><span class="jobdescription">' + current + '</span>'
+    else:
+        current = "Welcome to our company and learn about our community. " * 20
+        html = "<main>" + current + "</main>"
+    update_workbook(original, output, [], as_of=TODAY, fetcher=lambda url: Page(url, html))
+    values = get_values(output)
+    assert values["Assistant description"].strip() == (current if scoped else earlier).strip()
+    assert values["Assistant latest fetch snapshot"]

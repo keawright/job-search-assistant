@@ -76,7 +76,49 @@ def main(argv=None):
                         help="Fresh assessments only for selected input-sheet Excel rows, e.g. 98,101,103-105; others use cache only")
     update.add_argument("--reassess-needed", action="store_true",
                         help="Fresh assessments only for unapplied jobs whose saved Apply order is Needs assessment or Needs review")
+    search = sub.add_parser("search", help="Discover new roles without editing the application workbook")
+    search.add_argument("--workbook", type=Path)
+    search.add_argument("--captures", type=Path, help="Private connected-search capture directory")
+    search.add_argument("--reviews", type=Path, help="Private evidence-validated review bundle")
+    search.add_argument("--offline", action="store_true", help="Process supplied evidence without network/model requests")
+    search.add_argument("--max-queries", type=int, default=200)
+    search.add_argument("--max-requests", type=int, default=250)
+    search.add_argument("--max-ai-calls", type=int, default=100)
+    search.add_argument("--resume", type=Path)
+    search.add_argument("--ai-model")
+    search.add_argument("--verify-leads", action="store_true", help="Recheck application status in the latest search report")
+    search.add_argument("--input-report", type=Path)
+    search.add_argument("--verification-captures", type=Path)
+    search.add_argument("--max-verifications", type=int, default=100)
+    search.add_argument("--plan", action="store_true", help="Print repeatable discovery plan without running it")
     args = parser.parse_args(argv)
+    if args.command == "search":
+        from .searching.discovery import plan
+        from .searching.engine import run_search
+        if args.verify_leads:
+            if not 1 <= args.max_verifications <= 500: parser.error("Verification limit must be 1-500")
+            from .searching.verification_runner import verify_leads
+            try:
+                verify_leads(Path.cwd(),report=args.input_report,captures=args.verification_captures,
+                             offline=args.offline,limit=args.max_verifications,
+                             progress=lambda message: print(message,flush=True))
+            except (OSError,ValueError,TypeError,KeyError) as exc:
+                print(f"Verification error: {exc}",file=sys.stderr);return 2
+            return 0
+        if args.plan:
+            for method, query in plan(): print(f"{method}: {query}")
+            return 0
+        if not (0 <= args.max_ai_calls <= 200 and 0 <= args.max_queries <= 500 and 0 <= args.max_requests <= 2000):
+            parser.error("Search budgets: AI 0-200, queries 0-500, requests 0-2000")
+        try:
+            run_search(Path.cwd(), workbook=args.workbook, captures=args.captures, reviews=args.reviews,
+                       offline=args.offline, max_queries=args.max_queries, max_requests=args.max_requests,
+                       max_assessments=args.max_ai_calls, resume_path=args.resume, model=args.ai_model,
+                       progress=lambda message: print(message, flush=True))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            print(f"Search error: {exc}", file=sys.stderr)
+            return 2
+        return 0
     if (args.reassess_rows is not None or args.reassess_needed) and (args.reassess or args.offline or args.no_ai):
         parser.error("Targeted reassessment cannot be combined with --reassess, --offline, or --no-ai")
     if args.reassess_rows is not None and args.reassess_needed:

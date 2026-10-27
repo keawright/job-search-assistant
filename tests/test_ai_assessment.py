@@ -345,3 +345,98 @@ def test_legacy_config_does_not_cap_initial_assessments(tmp_path):
     assert load_service(tmp_path,max_calls=3).max_calls == 3
     config['max_refresh_calls']=2;path.write_text(json.dumps(config))
     assert load_service(tmp_path).max_refresh_calls == 2
+
+
+def test_failed_forced_refresh_retains_only_matching_valid_cache(tmp_path, job, payload):
+    class Failed:
+        name, model = "Synthetic", None
+        def assess(self, *args):
+            raise AssessmentError("Synthetic refresh failure")
+    service = AssessmentService(tmp_path, RESUME, Failed(), reassess=True)
+    candidate = CandidatePreferences()
+    service.save(job, candidate, payload, source="Earlier review", assessed_on=TODAY)
+    rating, entry = service.resolve(job, candidate, TODAY)
+    assert rating.technical_fit == "good"
+    assert entry["source"] == "Earlier review"
+    assert "Synthetic refresh failure" in entry["refresh_issue"]
+    changed = replace(job, description=DESCRIPTION + " Different responsibilities.")
+    with pytest.raises(AssessmentError, match="Synthetic refresh failure"):
+        service.resolve(changed, candidate, TODAY)
+
+
+def test_quotation_retry_has_feedback_and_counts_against_budget(tmp_path, job, payload):
+    class Correcting:
+        name, model = "Synthetic", None
+        def __init__(self): self.contexts = []
+        def assess(self, resume, context, candidate):
+            self.contexts.append(context)
+            result = deepcopy(payload)
+            if len(self.contexts) == 1:
+                result["technical_fit"]["job_quote"] = "Invented unsupported quotation"
+            return result
+    provider = Correcting()
+    service = AssessmentService(tmp_path, RESUME, provider, max_calls=2)
+    rating, _ = service.resolve(job, CandidatePreferences(), TODAY)
+    assert rating.technical_fit == "good"
+    assert service.calls == 2
+    assert "technical_fit" in provider.contexts[1]["quotation_correction"]
+    provider = Correcting()
+    limited = AssessmentService(tmp_path / "limited", RESUME, provider, max_calls=1)
+    with pytest.raises(AssessmentError, match="limit"):
+        limited.resolve(job, CandidatePreferences(), TODAY)
+    assert len(provider.contexts) == 1
+
+
+def test_unknown_refresh_does_not_replace_valid_cache(tmp_path, job, payload):
+    unknown = deepcopy(payload)
+    for key in CRITERIA:
+        unknown[key]["rating"] = "unknown"
+    class Unknown:
+        name, model = "Synthetic", None
+        def assess(self, *args): return unknown
+    service = AssessmentService(tmp_path, RESUME, Unknown(), reassess=True)
+    candidate = CandidatePreferences()
+    service.save(job, candidate, payload, source="Earlier review", assessed_on=TODAY)
+    rating, entry = service.resolve(job, candidate, TODAY)
+    assert rating.leadership_fit == "good"
+    assert "unknown fit" in entry["refresh_issue"]
+    assert service.created == 0
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_workbook_failed_refresh_distinguishes_valid_cache_from_history(tmp_path, payload, changed):
+    source, first, output = (tmp_path / n for n in ("source.xlsx", "first.xlsx", "output.xlsx"))
+    wb = Workbook(); ws = wb.active; ws.title = "Assistant queue"
+    ws.append(["Company", "Position title", "Job posting", "Application status", "Assistant description", "My notes"])
+    ws.append(["Example", "Manager", "https://example.com/role", "Not applied", DESCRIPTION, "Keep this"])
+    wb.save(source); wb.close()
+    class Provider:
+        name, model = "Synthetic", None
+        fail = False
+        def assess(self, *args):
+            if self.fail: raise AssessmentError("Synthetic failure")
+            return deepcopy(payload)
+    from job_search_assistant.ingestion import FetchError
+    def blocked(url): raise FetchError("Blocked")
+    provider = Provider()
+    service = AssessmentService(tmp_path / "private", RESUME, provider)
+    update_workbook(source, first, [], as_of=TODAY, fetcher=blocked, assessment_service=service)
+    if changed:
+        wb = load_workbook(first); ws = wb.active
+        headers = [c.value for c in ws[1]]
+        ws.cell(2, headers.index("Assistant description") + 1, DESCRIPTION + " Additional specialist responsibilities.")
+        wb.save(first); wb.close()
+    provider.fail = True; service.reassess = True
+    update_workbook(first, output, [], as_of=TODAY, fetcher=blocked, assessment_service=service)
+    wb = load_workbook(output); rows = list(wb.active.values); values = dict(zip(rows[0], rows[1])); wb.close()
+    assert values["My notes"] == "Keep this"
+    assert values["Application status"] == "Not applied"
+    assert values["Assistant previous assessment summary"] == payload["summary"]
+    if changed:
+        assert values["Apply order"] == "Needs assessment"
+        assert values["Assistant assessment outcome"] == "Assessment failed"
+        assert values["Assistant assessment summary"] is None
+    else:
+        assert isinstance(values["Apply order"], int)
+        assert values["Assistant assessment outcome"] == "Saved assessment retained; refresh failed"
+        assert values["Assistant assessment summary"] == payload["summary"]

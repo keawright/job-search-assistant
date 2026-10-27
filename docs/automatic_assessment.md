@@ -178,3 +178,41 @@ share the configured refresh allowance (default 20). Use `--max-ai-calls` to set
 an explicit total cap.
 The default input is the sole current top-level workbook, including your saved
 manual edits. Save and close Excel first. Add `--workbook` if multiple files exist.
+
+
+## Refresh failures and missing descriptions
+
+A forced refresh that fails keeps a previously saved assessment active only when
+its cache key matches the current candidate, preferences and role inputs, and its
+quotations still validate. A refresh returning entirely unknown ratings also
+keeps that matching valid assessment. The workbook reports the refresh failure;
+it does not claim the earlier assessment was newly completed. Changed inputs do
+not silently reuse earlier ratings. The previous workbook summary and assessment
+date remain in separate historical columns and do not affect ranking.
+
+Unsupported quotations trigger at most one correction request with validation
+feedback. Both requests count against the total and refresh allowances. Other
+provider errors are not automatically retried, and quotation validation is never
+relaxed.
+
+`Assistant assessment outcome` distinguishes `Description needed`,
+`Assessment failed`, `Saved assessment retained; refresh failed`, `Assessment needed`,
+and `Assessed`.
+The existing `Needs assessment` Apply order marker remains compatible with
+`--reassess-needed`. For missing descriptions, obtain role-specific evidence before
+repeatedly requesting assessments.
+
+When a newly fetched page lacks a substantive structured posting or scoped job
+body and has less text than the saved description, or lacks recognizable
+role-duty wording, the earlier
+evidence and its source/date are retained. The latest fetch snapshot is recorded
+separately; a warning explains that current availability remains unverified.
+An explicit closure notice still takes precedence. This conservative heuristic
+cannot identify every generic page and does not verify current vacancy status.
+
+Extraction also reads explicit JobPosting objects in application/json scripts
+and scopes fallback text to known public job-description containers (including
+LinkedIn, Lever, Greenhouse and SuccessFactors) before page-wide text. No JavaScript
+is executed, no access controls are bypassed, and missing job details are not
+inferred. Client-rendered or blocked sites may still require a supplied description
+or a verified alternate posting.

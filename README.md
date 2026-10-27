@@ -173,10 +173,10 @@ to check the actual Git index before every commit. See
 
 See [architecture](docs/architecture.md). Next phases:
 
-1. Add SQLite persistence, schema migrations, and FastAPI endpoints.
+1. Extend discovery SQLite persistence to application tracking and add FastAPI endpoints.
 2. Add a React/TypeScript table and editing interface.
 3. Extend URL compatibility with targeted ATS adapters and availability verification.
-4. Add CSV export and richer spreadsheet reconciliation where needed.
+4. Extend search CSV exports and improve spreadsheet reconciliation where needed.
 5. Expand evaluation coverage and live compatibility for the implemented assessment providers.
 
 GitHub Actions runs the tests and repository privacy guard on pushes and pull
@@ -198,3 +198,23 @@ without new AI calls. See [selected reassessment](docs/automatic_assessment.md#r
 Use `update --reassess-needed` to retry jobs whose saved **Apply order** is
 **Needs assessment** or **Needs review**, regardless of row position. Other jobs
 reuse cached assessments; protected statuses and existing review holds remain.
+
+
+## Discover new opportunities
+
+The separate search command imports all worksheets and archived workbooks as
+exclusions, discovers potential roles, and writes private search reports without
+editing the application tracker:
+
+```powershell
+.\.venv\Scripts\python.exe -m job_search_assistant search
+```
+
+It uses a private SQLite history, strict location/qualification/application gates,
+and persistent duplicate checks. Results include Recommended Jobs, Needs
+Verification, Rejected Jobs and Search Coverage. Recommendations require an independently
+verified, same-day employer application form. Use `search --verify-leads` to recheck
+saved leads. Network restrictions and unknown
+requirements are reported rather than converted into recommendations. See
+[the job discovery guide](docs/job_discovery.md) for budgets, evidence imports,
+source limitations, later runs and weekday Windows scheduling.

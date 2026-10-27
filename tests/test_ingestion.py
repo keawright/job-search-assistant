@@ -46,7 +46,7 @@ def test_fallback_excludes_scripts_and_flags_review():
     result = extract_posting('<title>Role</title><nav>Menu</nav><main>Lead a team<script>secret()</script></main>')
     assert result.description == "Lead a team"
     assert result.company is None
-    assert "fallback" in result.flags[0]
+    assert any("fallback" in flag for flag in result.flags)
 
 
 def test_bad_metadata_dates_and_types_do_not_become_facts():
@@ -135,3 +135,21 @@ def test_fetch_failures_bounded_and_explicit(monkeypatch, response, limit, messa
 def test_success_records_resolved_url(monkeypatch):
     connection_mock(monkeypatch, [Response(302, Location="/resolved"), Response()])
     assert fetch_page("https://example.com/job").url == "https://example.com/resolved"
+
+
+@pytest.mark.parametrize("selector", ["jobdescription", "description__text", "job-description"])
+def test_job_body_outside_main_excludes_navigation_and_related_jobs(selector):
+    result = extract_posting('<title>Careers</title><h1>Engineering Manager</h1>'
+                             '<nav>Other opportunities</nav><span class="' + selector + '">'
+                             'Lead engineers and deliver shared services.</span><aside>Unrelated jobs</aside>')
+    assert result.title == "Engineering Manager"
+    assert result.description == "Lead engineers and deliver shared services."
+    assert result.company is None
+
+
+def test_embedded_json_extracts_only_explicit_jobposting():
+    html = '<script id="__NEXT_DATA__" type="application/json">' + json.dumps({
+        "props": {"job": {"@type": "JobPosting", "title": "Manager", "description": "Lead engineers"}}}) + '</script>'
+    assert extract_posting(html).description == "Lead engineers"
+    generic = '<script type="application/json">' + json.dumps({"description": "Generic company careers"}) + '</script>'
+    assert extract_posting(generic).description is None
