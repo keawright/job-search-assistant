@@ -50,6 +50,39 @@ def fetched(url):
     return Page(url, '<script type="application/ld+json">' + json.dumps(data) + '</script>')
 
 
+@pytest.mark.parametrize('compact', [True, False])
+def test_rejected_tab_survives_repeated_updates_untouched(workbook, tmp_path, compact):
+    wb=load_workbook(workbook)
+    rejected=wb.create_sheet('Rejected')
+    rejected['A1']='https://example.com/rejected/123'
+    rejected['A1'].hyperlink='https://example.com/rejected/123'
+    rejected['A1'].font=copy(wb['Updated priorities']['H3'].font)
+    rejected['B1']='Already reviewed'
+    rejected['B1'].comment=Comment('Keep rejection notes', 'Candidate')
+    rejected['C1']='=1+2'
+    rejected.column_dimensions['B'].width=37
+    rejected.freeze_panes='B2'
+    rejected.sheet_state='hidden'
+    wb.save(workbook);wb.close()
+    before=hashlib.sha256(workbook.read_bytes()).hexdigest()
+    source=workbook
+    for name in ('first.xlsx','second.xlsx'):
+        output=tmp_path/name
+        update_workbook(source,output,[],as_of=TODAY,offline=True,compact=compact)
+        wb=load_workbook(output)
+        rejected=wb['Rejected']
+        assert list(rejected.values)==[('https://example.com/rejected/123','Already reviewed','=1+2')]
+        assert rejected['A1'].hyperlink.target=='https://example.com/rejected/123'
+        assert rejected['B1'].comment.text=='Keep rejection notes'
+        assert rejected.column_dimensions['B'].width==37
+        assert rejected.freeze_panes=='B2'
+        assert rejected.sheet_state=='hidden'
+        if compact: assert set(wb.sheetnames)=={'Assistant queue','Rejected'}
+        wb.close()
+        source=output
+    assert hashlib.sha256(workbook.read_bytes()).hexdigest()==before
+
+
 def test_update_preserves_original_tabs_tracking_and_missing_url_applied(workbook, tmp_path):
     before = hashlib.sha256(workbook.read_bytes()).hexdigest()
     output = tmp_path / "updated.xlsx"

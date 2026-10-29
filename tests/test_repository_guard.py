@@ -8,7 +8,7 @@ guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guard)
 
 
-@pytest.mark.parametrize("path", ["TASK.md", "resume.pdf", "resume.docx", "jobs.XLSX", "archive/old.xlsx", ".env", ".env.production", "data/private/profile.json", "credentials.json", ".ssh/id_ed25519", "new_urls.txt"])
+@pytest.mark.parametrize("path", ["TASK.md", "resume.pdf", "resume.docx", "jobs.XLSX", "archive/old.xlsx", ".env", ".env.production", "data/private/profile.json", "credentials.json", ".ssh/id_ed25519", "new_urls.txt", "JDs/matches.json", "JDs/notes.txt"])
 def test_private_files_blocked_even_if_force_added(path):
     assert guard.check_blob(path, b"private data")
 

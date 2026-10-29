@@ -13,7 +13,9 @@ PRIMARY = ['Engineering Manager','Senior Engineering Manager','Software Engineer
 SECONDARY = ['Technical Project Manager','IT Program Manager','Director of Engineering',
              'Director of Software Engineering','Director of Technical Program Management','Director of Technology',
              'Engineering Delivery Manager','Development Manager','Agile Delivery Manager',
-             'Organizational Change Manager','Technical Operations Manager']
+             'Organizational Change Manager','Organizational Change Management Lead','Technical Operations Manager',
+             'Associate Director of Engineering','Associate Director, Technology','Senior Project Manager',
+             'Program Manager','Delivery Manager','Change Management Manager']
 BOARDS = ['linkedin.com/jobs','ca.indeed.com','wellfound.com','welcometothejungle.com','builtin.com',
           'remote.co','weworkremotely.com','remoteok.com','workintech.ca','careerbeacon.com','digitalnovascotia.com',
           'jobs.novascotia.ca','jobs.smartrecruiters.com','myworkdayjobs.com','bamboohr.com','jobvite.com','icims.com']

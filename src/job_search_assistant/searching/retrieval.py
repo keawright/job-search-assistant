@@ -58,14 +58,24 @@ def enrich(posting, client):
     posting.application_status='unverified'
     posting.application_verification_fresh=False
     posting.application_verification_evidence='Current application check incomplete'
-    page = client.get(posting.url)
+    try:
+        page = client.get(posting.url)
+    except (ValueError, OSError) as exc:
+        from .verification import mark_removed
+        if mark_removed(posting, posting.url, exc):
+            return posting
+        raise
     data = extract_posting(page.html)
+    feed_evidence = (posting.full_text and posting.source.startswith(('Greenhouse board:', 'Lever board:', 'Ashby board:'))
+                     and len(posting.description.strip()) >= 100)
+    complete_page = bool(data.company and data.title and data.description)
     posting.aliases = list(set(posting.aliases + [posting.url]))
     posting.url = page.url
-    posting.company = data.company or posting.company
-    posting.title = data.title or posting.title
-    posting.description = data.description or ''
-    posting.full_text = bool(data.company and data.title and data.description)
+    if complete_page or not feed_evidence:
+        posting.company = data.company or posting.company
+        posting.title = data.title or posting.title
+        posting.description = data.description or ''
+        posting.full_text = complete_page
     posting.location = data.location.evidence or posting.location
     posting.arrangement = data.location.arrangement
     posting.posted = data.posting_date.isoformat() if data.posting_date else posting.posted

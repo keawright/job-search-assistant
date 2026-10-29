@@ -45,7 +45,8 @@ def closure_evidence(html: str) -> str | None:
     scope = soup.find("main") or soup.find("article") or soup
     notices = re.compile(
         r"(?:this|the) (?:job|position|role|vacancy|job posting|job opening) "
-        r"(?:is no longer available|is no longer open|has been closed|has been filled|has expired|is closed|is filled)"
+        r"(?:is no longer available|is no longer open|is no longer active|has been closed|has been filled|has already been filled|has been removed|has expired|is closed|is filled)"
+        r"|(?:this|the) (?:job|position|role|vacancy|job posting|job opening) is (?:not available|no longer posted)"
         r"|(?:we are |we're )?no longer accepting applications(?: for this (?:job|position|role))?"
         r"|this job posting has expired|the job you are trying to apply for is no longer available", re.I)
     for element in scope.find_all(["h1", "h2", "h3", "p", "div", "span", "button"]):

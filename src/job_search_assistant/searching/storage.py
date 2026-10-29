@@ -49,6 +49,23 @@ class Store:
             for ws in wb:
                 headers = None
                 for cells in ws.iter_rows():
+                    # User-maintained rejection list can be just pasted links,
+                    # with no company/title columns or even a header row.
+                    if ws.title.strip().casefold() == 'rejected':
+                        origin = f'{Path(path).name}:{ws.title}:{cells[0].row}'
+                        urls = set()
+                        for cell in cells:
+                            urls.update(re.findall(r'https?://[^\s<>"\)]+', str(cell.value or '')))
+                            if cell.hyperlink and cell.hyperlink.target:
+                                urls.add(cell.hyperlink.target)
+                        for url in urls:
+                            try:
+                                for identity in identities(url):
+                                    self.db.execute('INSERT OR IGNORE INTO exclusions VALUES(?,?)', (identity, origin))
+                            except ValueError:
+                                continue
+                        if urls: count += 1
+                        continue
                     values = [str(c.value or '').strip() for c in cells]
                     if headers is None:
                         if any(v.casefold() in {'company', 'employer'} for v in values) and any('url' in v.casefold() or 'job posting' in v.casefold() for v in values):

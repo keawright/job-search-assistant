@@ -216,3 +216,41 @@ LinkedIn, Lever, Greenhouse and SuccessFactors) before page-wide text. No JavaSc
 is executed, no access controls are bypassed, and missing job details are not
 inferred. Client-rendered or blocked sites may still require a supplied description
 or a verified alternate posting.
+
+## Local PDF fallback
+
+Put job-description exports in `JDs/` beside the current workbook. Normal updates
+and `--reassess-needed` automatically check this folder for jobs marked
+`Needs assessment`, `Assessment failed`, or `Description needed`. A new assessment
+failure or all-unknown result also triggers one fallback attempt. Existing AI call
+limits still apply; PDFs cannot fix login, account-limit or provider failures.
+
+Selectable PDF text is read using pypdf (install with `python -m pip install -e
+".[pdf]"`) or a local pdftotext installation. Image-only exports use Windows'
+built-in OCR, with installed OCR languages. No external OCR service is used.
+OCR can introduce errors; check quoted requirements when an assessment surprises you.
+Extraction is bounded to 30 MB and 40 pages per PDF (OCR), with process timeouts.
+
+Matching requires the posting URL or both employer and title in the opening
+section. Filenames alone never establish a match. Conflicting PDFs and matches to
+multiple tracked jobs stay flagged. For reviewed exceptions, create private
+`JDs/matches.json` mapping a PDF filename to its exact posting URL and SHA256:
+
+```json
+{
+  "example-role.pdf": {
+    "url": "https://example.com/jobs/123",
+    "sha256": "FULL_SHA256_OF_THE_REVIEWED_PDF"
+  }
+}
+```
+
+Use `Get-FileHash .\JDs\example-role.pdf -Algorithm SHA256` to obtain the hash
+(store it in lowercase). Replaced PDFs require renewed review of explicit matches.
+Extracted text is cached privately by content hash, and PDF changes invalidate
+assessment reuse through the changed description. The workbook records the PDF
+filename, hash, and extraction method. Protected statuses and manual ratings stay
+untouched. A PDF establishes role evidence only: it does not establish current
+application acceptance, location eligibility, or override a confirmed closure.
+`--offline`/`--no-ai` never initiate an AI request, even when a PDF is available.
+The whole `JDs/` folder and extracted text remain excluded from publication.

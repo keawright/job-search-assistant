@@ -9,6 +9,49 @@ from job_search_assistant.searching.verification import inspect_connected,curren
 from job_search_assistant.searching.reporting import export
 from job_search_assistant.ingestion import Page
 
+
+@pytest.mark.parametrize('notice', ['This job is closed.', 'This position is no longer active.',
+                                  'This job posting has been removed.', 'This role has already been filled.'])
+def test_closed_notice_detected_without_job_description(notice):
+    p=Posting('https://example.com/jobs/123','Example','Engineering Manager')
+    inspect_connected(p,connected(p.url,body=notice))
+    assert p.application_status=='closed'
+
+
+@pytest.mark.parametrize('error,closed', [('HTTP 404', True), ('HTTP 410', True),
+                                        ('HTTP 403', False), ('HTTP 429', False),
+                                        ('Robots/access check unavailable: HTTP 404', False)])
+def test_removed_vacancy_distinguished_from_access_failure(error,closed):
+    from job_search_assistant.searching.verification import verify_live
+    from job_search_assistant.ingestion import FetchError
+    p=Posting('https://example.com/jobs/123','Example','Engineering Manager')
+    class Client:
+        def get(self,url): raise FetchError(error)
+    if closed:
+        verify_live(p,Client())
+        assert p.application_status=='closed'
+    else:
+        with pytest.raises(FetchError): verify_live(p,Client())
+        assert p.application_status=='unverified'
+
+
+def test_closed_posting_exported_as_rejected_without_fit_review(tmp_path):
+    p=Posting('https://example.com/jobs/123','Example','Engineering Manager')
+    inspect_live(p,Page(p.url,'<main><h2>This job is closed.</h2></main>'))
+    xlsx,_=export(tmp_path,'closed',[(p,'verification','Description missing',{})],[])
+    wb=load_workbook(xlsx,data_only=True)
+    assert wb['Needs Verification'].max_row==1
+    assert wb['Recommended Jobs'].max_row==1
+    assert wb['Rejected Jobs'].max_row==2
+    wb.close()
+
+
+def test_third_party_404_and_generic_career_404_do_not_establish_job_closure():
+    from job_search_assistant.searching.verification import mark_removed
+    p=Posting('https://example.com/jobs/123','Example','Engineering Manager')
+    assert not mark_removed(p,'https://linkedin.com/jobs/view/123','HTTP 404')
+    assert not mark_removed(p,'https://example.com/careers','HTTP 404')
+
 FORM='Apply for this job\nFirst Name[Input]\nLast Name[Input]\nEmail[Input]\nResume/CV[Input]\nSubmit application'
 
 

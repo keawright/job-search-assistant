@@ -11,7 +11,7 @@ import sys
 from urllib.parse import urlsplit
 
 PRIVATE_SUFFIXES = {".pdf", ".doc", ".docx", ".xlsx", ".xls", ".xlsm", ".xlsb", ".ods", ".csv", ".tsv", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx"}
-PRIVATE_PARTS = {"archive", ".job-search-assistant-private", ".venv", "__pycache__", ".pytest_cache", ".ssh", ".aws", ".codex", ".agents", ".tools"}
+PRIVATE_PARTS = {"archive", "jds", ".job-search-assistant-private", ".venv", "__pycache__", ".pytest_cache", ".ssh", ".aws", ".codex", ".agents", ".tools"}
 PRIVATE_NAMES = {"task.md", "new_urls.txt", ".git-credentials", ".netrc", ".npmrc", ".pypirc", "credentials.json"}
 PATTERNS = {
     "private key": re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"),

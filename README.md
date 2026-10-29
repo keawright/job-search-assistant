@@ -10,7 +10,7 @@ unknowns, original record, and ranking-policy version.
 Version 0.2 includes a deterministic ranking library and a command-line workflow
 that reads posting URLs and exports an updated Excel queue. It preserves the input
 workbook and original tracking columns. Older workbooks and their tabs go in
-`archive/`; the current workbook normally contains one Assistant queue tab. New facts use structured
+`archive/`; the current workbook contains the Assistant queue and preserves a user-maintained Rejected tab when present. New facts use structured
 posting metadata; contextual fit remains evidence-backed human input.
 Optional automatic resume-based assessment now uses your signed-in Codex CLI;
 a direct OpenAI API provider is also available. Personal resumes, assessments,
@@ -49,6 +49,9 @@ New jobs have extracted facts and review
 flags; configured automatic assessment compares their role evidence with your
 resume. Unchanged saved assessments are reused. See
 [automatic assessment and login setup](docs/automatic_assessment.md).
+If an assessment fails or needs role text, updates also check local PDF exports in
+`JDs/`. Image exports use Windows OCR; matching, provenance, and limitations are
+documented in the assessment guide. Saved PDFs do not verify current availability.
 **Apply order** is recalculated from evidence-backed contextual assessment inputs.
 Assessed actionable jobs receive numbers and are sorted by that number; entirely
 unassessed jobs show **Needs assessment**, with no numeric Assistant priority.

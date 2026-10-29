@@ -20,6 +20,7 @@ from .discovery import Identity, find_alternative, is_linkedin, linkedin_identit
 from .models import Assessment, CandidatePreferences, Gap, Job, Location
 from .ranking import prioritize
 from .assessment import CRITERIA, AssessmentError
+from .local_jds import LocalDescriptions
 
 QUEUE_SHEET = "Assistant queue"
 MANUAL_COLUMNS = ["Manual priority", "Leadership fit", "Technical fit", "Career alignment", "Opportunity quality",
@@ -34,6 +35,7 @@ GENERATED_COLUMNS = ["Apply order", "Assistant ID", "Assistant section", "Assist
                      "Assistant alternate URL", "Assistant discovery notes", "Assistant discovery identity", "Assistant assessment status",
                      "Assistant assessment source", "Assistant assessed on", "Assistant assessment summary", "Assistant assessment evidence",
                      "Assistant assessment strengths", "Assistant assessment gaps", "Assistant assessment uncertainties", "Assistant assessment issue", "Assistant assessment outcome",
+                     "Assistant local description file", "Assistant local description SHA256", "Assistant local description method",
                      "Assistant previous assessment summary", "Assistant previous assessment date", "Assistant latest fetch snapshot"]
 ALIASES = {"company": ("Company",), "title": ("Position title", "Position", "Title"),
            "url": ("Job posting (URL)", "Job posting", "Job posting URL"), "status": ("Application status",),
@@ -381,6 +383,9 @@ def _fetch(record, url, snapshots, as_of, fetcher, searcher=search_postings):
     if preserve_evidence:
         v.update(previous_evidence)
         v["Assistant extraction flags"] = "\n".join(extracted.flags) + "\nLatest page lacks a complete role posting; retained earlier role evidence with its original source and fetch date. Current availability remains unverified."
+    else:
+        for key in ("Assistant local description file", "Assistant local description SHA256", "Assistant local description method"):
+            v[key] = None
     if eligible:
         evidence = closure_evidence(page.html)
         if evidence:
@@ -497,6 +502,27 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
         # Validate one record at a time; malformed user data stays visible.
         valid, ids, job_urls = [], set(), set()
         assessment_issues = {}
+        local_jobs = []
+        for record in records:
+            try:
+                local_jobs.append(_make_job(record, wb.epoch))
+            except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+                pass
+        local_descriptions = LocalDescriptions(source.parent, local_jobs, progress=progress)
+
+        def use_local_description(record, job):
+            if reassess_rows is not None and record.row not in reassess_rows:
+                return job, False
+            document, flags = local_descriptions.find(job)
+            record.flags.extend(flags)
+            if document is None:
+                return job, False
+            record.values.update({"Assistant description": document.text[:30000],
+                                  "Assistant local description file": document.path.name,
+                                  "Assistant local description SHA256": document.sha256,
+                                  "Assistant local description method": document.method})
+            record.flags.append("Assessment uses a user-supplied PDF description; OCR may contain errors. It does not verify current application availability.")
+            return replace(job, description=document.text[:30000]), True
         # Keep records in source order for output/status stability, but give newly
         # added jobs first use of the assessment budget.
         for record in sorted(records, key=lambda record: record.row is not None):
@@ -519,16 +545,35 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                         record.values["Assistant assessment source"] = "Manual assessment inputs (preserved)"
                     else:
                         try:
+                            prior_outcome = str(record.values.get("Assistant assessment outcome") or "").casefold()
+                            needs_description = (str(record.values.get("Assistant assessment status") or "").casefold() == "needs assessment"
+                                                 or "failed" in prior_outcome or prior_outcome == "description needed"
+                                                 or len(job.description or "") < 100)
+                            used_local = False
+                            if needs_description:
+                                job, used_local = use_local_description(record, job)
                             if progress:
                                 kind = "New job" if record.row is None else "Existing job"
                                 progress(f"{kind} assessment: {job.company} - {job.title}")
                             created_before = assessment_service.created
-                            if reassess_rows is None:
-                                assessment, entry = assessment_service.resolve(job, candidate, as_of, offline=offline)
-                            else:
+                            def resolve_current():
+                                if reassess_rows is None:
+                                    return assessment_service.resolve(job, candidate, as_of, offline=offline)
                                 selected = record.row in reassess_rows
-                                assessment, entry = assessment_service.resolve(job, candidate, as_of,
-                                    offline=not selected, force=selected)
+                                return assessment_service.resolve(job, candidate, as_of, offline=not selected, force=selected)
+                            try:
+                                assessment, entry = resolve_current()
+                            except AssessmentError:
+                                if used_local:
+                                    raise
+                                job, used_local = use_local_description(record, job)
+                                if not used_local:
+                                    raise
+                                assessment, entry = resolve_current()
+                            if not used_local and (entry.get("refresh_issue") or all(getattr(assessment, key) == "unknown" for key in CRITERIA)):
+                                job, used_local = use_local_description(record, job)
+                                if used_local:
+                                    assessment, entry = resolve_current()
                             if progress:
                                 outcome = "completed" if assessment_service.created > created_before else "saved result reused"
                                 progress(f"Assessment {outcome}.")
@@ -699,7 +744,7 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
             if any(c.data_type == "f" and "!" in str(c.value) for row in target for c in row):
                 raise ValueError("Single-tab export cannot preserve cross-sheet formulas; use --keep-history-tabs")
             for old_sheet in list(wb.worksheets):
-                if old_sheet is not target:
+                if old_sheet is not target and old_sheet.title.strip().casefold() != "rejected":
                     wb.remove(old_sheet)
         wb.active = 0
         output.parent.mkdir(parents=True, exist_ok=True)

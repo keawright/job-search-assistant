@@ -4,7 +4,7 @@ import json
 import re
 from ..assessment import SCHEMA, INSTRUCTIONS, CodexAssessor, AssessmentError, validate_assessment, job_evidence, normalized
 from ..models import Job, CandidatePreferences
-from .eligibility import location_gate
+from .eligibility import location_gate, exclusion_reason
 
 
 def obj(properties):
@@ -81,6 +81,8 @@ class SearchReviewer:
 
 
 def decide(posting,payload,resume):
+    hard_exclusion=exclusion_reason(posting)
+    if hard_exclusion: return 'rejected',hard_exclusion
     rating=validate_review(payload,resume,context_for(posting))
     hard_location,reason=location_gate(posting.description,posting.location)
     if hard_location=='ineligible' or payload['location']['status']=='ineligible':

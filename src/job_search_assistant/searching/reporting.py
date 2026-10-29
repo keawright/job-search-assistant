@@ -29,7 +29,14 @@ def row(posting,state,reason,review):
 
 
 def export(folder,run,results,coverage,*,title="New job opportunities"):
-    from .verification import current_application_verified
+    from .eligibility import exclusion_reason
+    results=[(p,'rejected',exclusion_reason(p),review)
+             if state in {'recommended','verification'} and exclusion_reason(p) else (p,state,reason,review)
+             for p,state,reason,review in results]
+    from .verification import current_application_verified, current_closure_verified
+    results=[(p,'rejected','Employer vacancy closed or removed: '+p.application_verification_evidence,review)
+             if state in {'recommended','verification'} and current_closure_verified(p) else (p,state,reason,review)
+             for p,state,reason,review in results]
     results=[(p,'verification','Recommendation withheld: current application acceptance is not verified today',review)
              if state=='recommended' and not current_application_verified(p) else (p,state,reason,review)
              for p,state,reason,review in results]

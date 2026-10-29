@@ -11,6 +11,14 @@ workbooks in `archive/`, including hidden sheets. It also excludes pending URLs
 in `new_urls.txt`. It never edits or archives the application tracker. If multiple
 current workbooks exist, supply `--workbook` explicitly.
 
+The user-maintained `Rejected` tab is also an exclusion list. It can contain
+plain posting URLs anywhere, with no headers or company/title fields required.
+Hyperlinks and literal URLs in HYPERLINK formulas are read as well. Canonical URL
+and recognized ATS identities exclude alternate links to the same posting.
+The assessor carries this tab into each new workbook without assessing its rows
+or changing its contents, including in the default compact export. Rejection
+identities are retained in the search database and archived-workbook exclusions.
+
 All search state is private under `.job-search-assistant-private/search/`:
 
 - `discovery.sqlite3`: imported identities, findings, decisions, events, employer
@@ -26,6 +34,31 @@ supported material requirements and visible current application evidence qualify
 Missing salary is allowed, and there is no salary floor. Fit scores are ordinal
 labels (Strong=4, Good=3), never hiring probabilities. Unknown posting dates remain
 blank; crawl and update dates are not substituted. Fit sorts before recency.
+
+Availability is checked before fit review. A current, explicit
+employer closure notice rejects a role even when its description is missing.
+HTTP 404/410 responses from a specific employer vacancy/application URL are
+recorded as removed postings. A third-party missing page, missing careers index,
+robots failure, HTTP 403/429, timeout or JavaScript-only page does not establish
+closure; these remain unverified. Relevant roles with a full description can still
+receive a grounded fit review while application status is unresolved; fit alone
+cannot promote them to recommendations. Full public ATS descriptions are retained
+when a subsequent JavaScript-only page provides less evidence. Previously supplied
+grounded reviews remain subject to all export gates.
+Export independently moves verified closures out of Needs Verification and into
+Rejected Jobs. Rejected identities remain excluded on subsequent discovery runs.
+An HTTP-successful page or visible Apply link alone never establishes acceptance.
+
+Role and location exclusions run before uncertain-duplicate handling, again after
+retrieval, during verification runs, and at export. Individual-contributor software
+and security engineering roles do not belong in Needs Verification. Structured
+foreign-only vacancy locations (including Remote Spain, Poland, US and UK) are
+excluded; multi-country locations explicitly including Canada remain eligible for
+full review. Missing location evidence remains unknown. Company office locations
+in a Canadian role's description do not by themselves establish a restriction.
+Director/Associate Director, engineering management, delivery, organizational
+change, project and program leadership remain within scope; full requirements
+and resume evidence determine fit, not title alone.
 
 ## Sources and limits
 

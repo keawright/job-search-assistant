@@ -13,6 +13,65 @@ from job_search_assistant.ingestion import Page, FetchError
 from job_search_assistant.assessment import CRITERIA, AssessmentError
 
 
+def test_headerless_rejected_tab_excludes_plain_links_hyperlinks_and_ats_aliases(tmp_path):
+    path=tmp_path/'tracker.xlsx'
+    wb=Workbook();ws=wb.active
+    ws.append(['Company','Job title','Job posting (URL)'])
+    rejected=wb.create_sheet('Rejected')
+    rejected.append(['https://www.linkedin.com/jobs/view/123456?utm_source=feed'])
+    rejected.append(['Already rejected'])
+    rejected['A2'].hyperlink='https://example.com/role?gh_jid=789'
+    rejected['C3']='https://example.com/another-job'
+    rejected['B4']='=HYPERLINK("https://example.com/formula-job","Rejected")'
+    wb.save(path);wb.close()
+    store=Store(tmp_path/'db.sqlite3')
+    try:
+        assert store.import_workbook(path)==4
+        for url in ['https://www.linkedin.com/jobs/view/123456',
+                    'https://job-boards.greenhouse.io/example/jobs/789',
+                    'https://example.com/another-job','https://example.com/formula-job']:
+            state,reason=store.duplicate(Posting(url))
+            assert state=='duplicate'
+            assert ':Rejected:' in reason
+        assert store.duplicate(Posting('https://example.com/new'))[0]==''
+    finally: store.close()
+
+
+@pytest.mark.parametrize('closed,full_text', [(True,False),(True,True),(False,True)])
+def test_search_excludes_closed_before_fit_review(tmp_path,monkeypatch,closed,full_text):
+    from types import SimpleNamespace
+    from job_search_assistant.searching import engine
+    from job_search_assistant.searching.verification import inspect_live
+    from openpyxl import load_workbook
+    tracker=tmp_path/'tracker.xlsx'
+    wb=Workbook();ws=wb.active
+    ws.append(['Company','Job title','Job posting (URL)'])
+    ws.append(['Tracked','Engineering Manager','https://tracked.example/jobs/1'])
+    wb.save(tracker);wb.close()
+    posting=Posting('https://example.com/role/123','Example','Engineering Manager')
+    monkeypatch.setattr(engine,'capture_postings',lambda captures:[posting])
+    monkeypatch.setattr(engine,'load_service',lambda *a,**kw:SimpleNamespace(resume='Synthetic candidate leadership evidence'))
+    monkeypatch.setattr(engine,'plan',lambda:[])
+    class Reviewer:
+        def review(self,p):
+            if closed: pytest.fail('Closed posting reached AI fit review')
+            raise AssessmentError('Synthetic fit review unavailable')
+    monkeypatch.setattr(engine,'SearchReviewer',lambda *a:Reviewer())
+    def enrich(p,client):
+        p.full_text=full_text
+        p.description='Lead platform engineering teams remotely across Canada.' if full_text else ''
+        notice='This job is closed.' if closed else 'Engineering Manager. Apply now.'
+        inspect_live(p,Page(p.url,'<main><h2>'+notice+'</h2></main>'))
+        return p
+    monkeypatch.setattr(engine,'enrich',enrich)
+    outputs=engine._run_search(tmp_path,workbook=tracker,max_queries=0,progress=lambda s:None)
+    report=load_workbook(outputs[0],data_only=True)
+    assert report['Recommended Jobs'].max_row==1
+    assert report['Rejected Jobs' if closed else 'Needs Verification'].max_row==2
+    assert report['Needs Verification' if closed else 'Rejected Jobs'].max_row==1
+    report.close()
+
+
 def test_canonical_ids_link_custom_employer_and_ats_urls():
     assert identities('https://example.com/job?gh_jid=123&utm_source=feed') & identities('https://job-boards.greenhouse.io/demo/jobs/123?gh_src=tracking') == {'greenhouse:123'}
     assert canonical('https://example.com/job/?gh_src=test&utm_campaign=foo')=='https://example.com/job'
@@ -159,10 +218,10 @@ def test_report_sanitizes_search_controls_and_formula_injection(tmp_path):
     p,r,resume=review_fixture();p.title="=unsafe"+chr(0)+"title"
     xlsx,md=export(tmp_path,"synthetic",[(p,"verification","Need employer confirmation",r)],[])
     from openpyxl import load_workbook
-    wb=load_workbook(xlsx);cell=wb["Needs Verification"].cell(2,2)
+    wb=load_workbook(xlsx);cell=wb["Rejected Jobs"].cell(2,2)
     assert cell.value=="'=unsafetitle"
     assert cell.data_type=='s'
-    assert wb["Needs Verification"].cell(2,12).hyperlink.target==p.url
+    assert wb["Rejected Jobs"].cell(2,12).hyperlink.target==p.url
     wb.close()
 
 

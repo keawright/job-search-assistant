@@ -13,6 +13,7 @@ data/private/
 .job-search-assistant-private/
 archive/
 new_urls.txt
+JDs/
 *.pdf
 *.doc
 *.docx

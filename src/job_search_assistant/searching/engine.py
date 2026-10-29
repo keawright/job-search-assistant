@@ -12,9 +12,10 @@ from .normalization import Posting, canonical, company_key
 from .storage import Store
 from .discovery import plan, web_search, ats_board, board_from_url, capture_postings, employer_page, EMPLOYERS
 from .retrieval import PublicClient, enrich
-from .eligibility import title_gate, location_gate
+from .eligibility import title_gate, location_gate, exclusion_reason
 from .evaluation import SearchReviewer, decide, review_hash
 from .reporting import export
+from .verification import current_closure_verified
 
 
 def _run_search(folder, *, workbook=None,captures=None,reviews=None,offline=False,max_queries=200,
@@ -137,7 +138,9 @@ def _run_search(folder, *, workbook=None,captures=None,reviews=None,offline=Fals
         for index,p in enumerate(candidates.values(),1):
             progress(f'[{index}/{len(candidates)}] {p.company} {p.title}')
             state,reason=store.duplicate(p); review={}
-            if state=='duplicate': pass
+            hard_exclusion=exclusion_reason(p)
+            if hard_exclusion: state,reason='rejected',hard_exclusion
+            elif state=='duplicate': pass
             elif state=='uncertain': state='verification'
             elif re.search(r'/careers/?(?:[?#].*)?$|/jobs/?(?:[?#].*)?$|/company/[^/]+/jobs|/role/l/|indeed\.com/[a-z]-.*jobs\.html',p.url,re.I): state,reason='rejected','Career/search index rather than a specific vacancy; visible links are explored separately where accessible'
             elif re.search(r'\.pdf(?:[?#]|$)',p.url,re.I): state,reason='rejected','Document search result; no verified current application posting'
@@ -157,8 +160,11 @@ def _run_search(folder, *, workbook=None,captures=None,reviews=None,offline=Fals
                         except (ValueError,OSError) as exc: reason='Role retrieval unavailable: '+str(exc)
                     matched,duplicate_reason=store.duplicate(p)
                     loc,loc_reason=location_gate(p.description,p.location)
-                    if matched=='duplicate': state,reason='duplicate',duplicate_reason
+                    hard_exclusion=exclusion_reason(p)
+                    if hard_exclusion: state,reason='rejected',hard_exclusion
+                    elif matched=='duplicate': state,reason='duplicate',duplicate_reason
                     elif matched=='uncertain': state,reason='verification',duplicate_reason
+                    elif current_closure_verified(p): state,reason='rejected','Employer vacancy closed or removed: '+p.application_verification_evidence
                     elif loc=='ineligible': state,reason='rejected',loc_reason
                     elif not p.full_text: state,reason='verification',reason or 'Full employer role description/application status not verified'
                     elif reviewer is None: state,reason='verification','Grounded fit review required'
@@ -166,6 +172,8 @@ def _run_search(folder, *, workbook=None,captures=None,reviews=None,offline=Fals
                         try:
                             review=reviewer.review(p); state,reason=decide(p,review,resume)
                         except (ValueError,OSError) as exc: state,reason='verification','Assessment unavailable: '+str(exc)
+            if state not in {'duplicate'} and current_closure_verified(p):
+                state,reason='rejected','Employer vacancy closed or removed: '+p.application_verification_evidence
             # Preserve a grounded review for audit even when duplicate/location
             # gates prevent recommending it. This does not override those gates.
             if not review and canonical(p.url) in reviewed:

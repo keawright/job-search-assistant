@@ -15,6 +15,7 @@ from .verification import inspect_connected,verify_live,current_application_veri
 from .evaluation import decide,review_hash
 from .reporting import export
 from .locking import run_lock
+from .eligibility import exclusion_reason
 
 
 def verify_leads(folder,*,report=None,captures=None,offline=False,limit=100,progress=print):
@@ -58,6 +59,11 @@ def _verify(root,private,report,captures,offline,limit,progress):
             p=Posting(**json.loads(stored[0])) if stored else Posting(url,row.get('Company') or '',row.get('Job title') or '',source=row.get('Evidence source') or '')
             review=json.loads(stored[1]) if stored else {}
             reason=row.get('Decision reason') or ''
+            hard_exclusion=exclusion_reason(p)
+            if state in {'recommended','verification'} and hard_exclusion:
+                store.record(p,'rejected',hard_exclusion,review,run)
+                results.append((p,'rejected',hard_exclusion,review))
+                continue
             if state in {'recommended','verification'}:
                 proof_candidates=list(captured.get(canonical(p.url),[]))
                 # An explicitly linked /apply page is the same vacancy by ATS ID.

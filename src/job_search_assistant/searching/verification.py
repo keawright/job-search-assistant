@@ -1,5 +1,6 @@
 """Independent, dated application-status proof; an AI verdict cannot supply it."""
 from datetime import date
+from html import escape
 import re
 from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
@@ -34,6 +35,30 @@ def current_application_verified(posting,as_of=None):
     # Bind proof to this vacancy, not an unrelated application or careers page.
     proof=identities(posting.application_verification_url)
     return any(proof & identities(url) for url in [posting.url]+posting.aliases)
+
+
+def current_closure_verified(posting):
+    return (posting.application_status == 'closed'
+            and posting.application_verification_fresh is True
+            and posting.application_checked_on == date.today().isoformat()
+            and bool(posting.application_verification_evidence.strip())
+            and is_employer_url(posting.application_verification_url, posting.company)
+            and any(identities(posting.application_verification_url) & identities(url)
+                    for url in [posting.url] + posting.aliases))
+
+
+def mark_removed(posting, url, error):
+    """Classify actual employer vacancy 404/410, excluding access/robots failures."""
+    if (not re.match(r'^HTTP (?:404|410)\b', str(error)) or not is_employer_url(url, posting.company)
+            or urlsplit(url).path.rstrip('/').casefold() in {'', '/jobs', '/careers', '/careers/jobs'}):
+        return False
+    posting.application_status='closed'
+    posting.application_checked_on=date.today().isoformat()
+    posting.application_verification_fresh=True
+    posting.application_verification_url=url
+    posting.application_verification_method='live_employer_page'
+    posting.application_verification_evidence='Employer vacancy URL removed: '+str(error)
+    return True
 
 
 def choose_verification(checks):
@@ -72,12 +97,12 @@ def inspect_connected(posting,raw,checked_on=None):
     redirect=re.search(r'Redirected to URL: (https?://[^;\s]+)',raw)
     if redirect: resolved=redirect[1]
     blocked=any(term in raw for term in ['Failed to fetch','not accessible via this tool','enable JavaScript','Blocked by robots.txt','Total lines: 0'])
-    closed=re.search(r'(?:this|the) (?:job|position|role|vacancy|job posting|job opening) (?:has expired|is closed|is no longer available|has been filled|has been closed)|no longer accepting applications|the job you are trying to apply for is no longer available',text,re.I)
+    closed=closure_evidence('<main>'+''.join('<p>'+escape(line)+'</p>' for line in text.splitlines())+'</main>')
     status='unverified'; reason='No job-specific employer application form verified'
     if blocked: reason='Page unavailable, blocked or JavaScript-only; current status unverified'
     elif not fresh: reason='Retrieved snapshot is not dated today; current application status unverified'
     elif not is_employer_url(resolved,posting.company): reason='Third-party/unconfirmed source; employer application status still needs verification'
-    elif closed: status='closed';reason=closed[0]
+    elif closed: status='closed';reason=closed
     elif form_surface(text) and re.search(r'\[Input\]|\[Select\]|\[Button: Attach',text): status='accepting';reason='Same-day employer/ATS page displays application heading, resume/CV, email and applicant-name fields'
     elif redirect: reason='Redirected away from the specific vacancy; acceptance not verified'
     posting.application_status=status
@@ -115,7 +140,16 @@ def verify_live(posting,client,page=None):
     posting.application_status='unverified'
     posting.application_verification_fresh=False
     posting.application_checked_on=date.today().isoformat()
-    page=page or client.get(posting.url)
+    def read(url):
+        try:
+            return client.get(url)
+        except (ValueError, OSError) as exc:
+            # Only an actual vacancy response, never a robots/access failure.
+            if mark_removed(posting, url, exc):
+                return None
+            raise
+    page=page or read(posting.url)
+    if page is None: return
     inspect_live(posting,page)
     if posting.application_status!='unverified': return
     soup=BeautifulSoup(page.html,'html.parser')
@@ -124,7 +158,8 @@ def verify_live(posting,client,page=None):
         target=urljoin(page.url,anchor['href'])
         try:
             if canonical(target)==canonical(posting.url) or not identities(target)&identities(posting.url):continue
-            inspect_live(posting,client.get(target))
+            application=read(target)
+            if application is not None: inspect_live(posting,application)
         except (ValueError,OSError):
             posting.application_verification_evidence='Application-link retrieval failed; acceptance remains unverified'
         break
