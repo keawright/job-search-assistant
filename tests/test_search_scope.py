@@ -88,6 +88,13 @@ def test_uncertain_duplicates_and_retrieved_titles_cannot_bypass_scope(tmp_path,
     monkeypatch.setattr(engine,'capture_postings',lambda captures:[p])
     monkeypatch.setattr(engine,'load_service',lambda *a,**kw:SimpleNamespace(resume='Synthetic candidate'))
     monkeypatch.setattr(engine,'plan',lambda:[])
+    # These cases test filtering with synthetic postings, not online discovery.
+    from job_search_assistant.searching import discovery
+    monkeypatch.setattr(discovery,'balanced_plan',lambda *args:[])
+    monkeypatch.setattr(discovery,'load_sources',lambda path:[])
+    def unexpected_network(*args,**kwargs):
+        pytest.fail('Synthetic filtering test attempted a live network request')
+    monkeypatch.setattr(engine.PublicClient,'_read',unexpected_network)
     class Reviewer:
         def review(self,p): pytest.fail('Out-of-scope job reached AI reviewer')
     monkeypatch.setattr(engine,'SearchReviewer',lambda *a:Reviewer())
