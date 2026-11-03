@@ -205,6 +205,12 @@ reuse cached assessments; protected statuses and existing review holds remain.
 
 ## Discover new opportunities
 
+Search reports include **Run Summary** and explicitly flag incomplete coverage.
+Zero recommendations during an incomplete run does not establish that no suitable
+jobs exist. Search supports optional Brave API credentials, persistent employer
+sources, rotating queries, new-results-only reports and reference-posting recall evaluation.
+See [reliability and evaluation](docs/job_discovery.md#search-reliability-and-interpreting-zero-results).
+
 The separate search command imports all worksheets and archived workbooks as
 exclusions, discovers potential roles, and writes private search reports without
 editing the application tracker:

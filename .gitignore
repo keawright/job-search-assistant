@@ -45,3 +45,4 @@ build/
 dist/
 .coverage
 htmlcov/
+/.test-search-reliability-*/

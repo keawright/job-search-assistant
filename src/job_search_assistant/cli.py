@@ -90,10 +90,11 @@ def main(argv=None):
     search.add_argument("--input-report", type=Path)
     search.add_argument("--verification-captures", type=Path)
     search.add_argument("--max-verifications", type=int, default=100)
+    search.add_argument("--benchmark-file", type=Path, help="Private JSON reference postings for discovery recall")
     search.add_argument("--plan", action="store_true", help="Print repeatable discovery plan without running it")
     args = parser.parse_args(argv)
     if args.command == "search":
-        from .searching.discovery import plan
+        from .searching.discovery import plan, balanced_plan
         from .searching.engine import run_search
         if args.verify_leads:
             if not 1 <= args.max_verifications <= 500: parser.error("Verification limit must be 1-500")
@@ -106,14 +107,14 @@ def main(argv=None):
                 print(f"Verification error: {exc}",file=sys.stderr);return 2
             return 0
         if args.plan:
-            for method, query in plan(): print(f"{method}: {query}")
+            for method, query in balanced_plan(plan()): print(f"{method}: {query}")
             return 0
         if not (0 <= args.max_ai_calls <= 200 and 0 <= args.max_queries <= 500 and 0 <= args.max_requests <= 2000):
             parser.error("Search budgets: AI 0-200, queries 0-500, requests 0-2000")
         try:
             run_search(Path.cwd(), workbook=args.workbook, captures=args.captures, reviews=args.reviews,
                        offline=args.offline, max_queries=args.max_queries, max_requests=args.max_requests,
-                       max_assessments=args.max_ai_calls, resume_path=args.resume, model=args.ai_model,
+                       max_assessments=args.max_ai_calls, resume_path=args.resume, model=args.ai_model, benchmark_file=args.benchmark_file,
                        progress=lambda message: print(message, flush=True))
         except (OSError, ValueError, TypeError, KeyError) as exc:
             print(f"Search error: {exc}", file=sys.stderr)

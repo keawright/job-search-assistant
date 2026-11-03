@@ -162,6 +162,42 @@ def test_persistent_history_preserves_decisions_and_excludes_reported(tmp_path):
     store.close()
 
 
+def test_search_only_exports_new_links_including_legacy_verification_reports(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from openpyxl import load_workbook
+    from job_search_assistant.searching import engine
+    from job_search_assistant.searching.reporting import export
+
+    tracker=tmp_path/'tracker.xlsx'
+    wb=Workbook(); wb.active.append(['Company','Job title','Job posting (URL)'])
+    wb.save(tracker); wb.close()
+    private=tmp_path/'.job-search-assistant-private'/'search'
+    old=Posting('https://job-boards.greenhouse.io/demo/jobs/123','Demo','Engineering Manager')
+    export(private/'reports','legacy',[(old,'verification','Needs evidence',{})],[])
+    # Simulate an older database with an unresolved, unreported finding.
+    store=Store(private/'discovery.sqlite3')
+    store.record(old,'verification','Needs evidence',{},'legacy'); store.close()
+    alias=Posting('https://boards.greenhouse.io/demo/jobs/123?utm_source=feed','Demo','Engineering Manager')
+    fresh=Posting('https://example.com/jobs/fresh','Fresh','Engineering Manager')
+    monkeypatch.setattr(engine,'load_service',lambda *a,**kw:SimpleNamespace(resume='Synthetic resume'))
+    monkeypatch.setattr(engine,'capture_postings',lambda captures:[alias,fresh])
+    first=engine.run_search(tmp_path,workbook=tracker,offline=True,progress=lambda s:None)
+    report=load_workbook(first[0],data_only=True)
+    assert report['Needs Verification'].max_row==2
+    assert report['Needs Verification']['L2'].value==fresh.url
+    assert report['Rejected Jobs'].max_row==1
+    report.close()
+    # Reporting history alone must suffice even if report files are moved away.
+    for path in (private/'reports').glob('*.xlsx'): path.rename(path.with_suffix('.saved'))
+    monkeypatch.setattr(engine,'capture_postings',lambda captures:[fresh])
+    second=engine.run_search(tmp_path,workbook=tracker,offline=True,progress=lambda s:None)
+    report=load_workbook(second[0],data_only=True)
+    for name in ['Recommended Jobs','Needs Verification','Rejected Jobs']:
+        assert report[name].max_row==1
+    report.close()
+    assert fresh.url not in second[1].read_text(encoding='utf-8')
+
+
 def test_robots_denial_and_failed_host_do_not_fetch_jobs():
     calls=[]
     def fetch(url,**kwargs):

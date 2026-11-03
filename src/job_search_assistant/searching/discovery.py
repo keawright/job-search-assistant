@@ -45,6 +45,8 @@ def web_search(query, client):
     soup = BeautifulSoup(page.html,'html.parser')
     if not soup.select('a.result__a') and re.search('captcha|anomaly|challenge',page.html,re.I):
         raise ValueError('Search blocked by anti-bot challenge; no bypass attempted')
+    if not soup.select('a.result__a') and not re.search(r'no results|no-results',page.html,re.I):
+        raise ValueError('Search response format unrecognized; results not established')
     for a in soup.select('a.result__a')[:15]:
         href = urljoin(page.url,a.get('href',''))
         href = parse_qs(urlsplit(href).query).get('uddg',[href])[0]
@@ -123,3 +125,41 @@ def employer_page(url,client):
         if title_gate(title):
             roles.append(Posting(href,title=title,source='Employer career page: '+page.url))
     return roles,boards
+
+
+# Public starting points, checked afresh; these are not availability claims.
+SEED_SOURCES = [
+    {'platform':'greenhouse','board':x} for x in
+    ['clio','gitlab','grafanalabs','tailscale','affirm','colabsoftware','coconutsoftware','stackadapt']
+] + [{'platform':'lever','board':x} for x in ['fullscript','pointclickcare','sprypointservices']] + [
+    {'platform':'ashby','board':x} for x in ['1password','jane','wealthsimple']
+]
+
+
+def load_sources(path):
+    entries=list(SEED_SOURCES)
+    if Path(path).exists(): entries += json.loads(Path(path).read_text(encoding='utf-8'))
+    for entry in entries:
+        if entry.get('platform') and (entry['platform'] not in {'greenhouse','lever','ashby'} or not re.fullmatch(r'[A-Za-z0-9_-]+',entry.get('board',''))):
+            raise ValueError('Invalid employer source platform/board')
+        if entry.get('url') and not entry['url'].startswith('https://'):
+            raise ValueError('Employer source URL must use HTTPS')
+    return entries
+
+
+def balanced_plan(queries, rotation=0):
+    from collections import defaultdict
+    groups=defaultdict(list)
+    for method,query in queries: groups[method].append((method,query))
+    groups['location variants'] += [('location variants',f'("engineering manager" OR "technical program manager" OR "delivery manager") {location} careers')
+        for location in ['"remote Canada"','"work from anywhere" Canada','"Nova Scotia"','"Atlantic Canada"','"Halifax"','"Canada eligible" remote']]
+    groups['title variants'] += [('title variants',f'"{title}" Canada careers') for title in
+        ['Software Development Lead','Engineering Team Lead','Technology Delivery Lead','Portfolio Manager','Transformation Lead']]
+    queues=[]
+    for values in groups.values():
+        offset=rotation % len(values)
+        queues.append(values[offset:]+values[:offset])
+    offset=rotation % len(queues)
+    queues=queues[offset:]+queues[:offset]
+    from itertools import zip_longest
+    return [item for batch in zip_longest(*queues) for item in batch if item]

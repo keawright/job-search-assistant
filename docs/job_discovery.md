@@ -1,5 +1,81 @@
 # Discovering new jobs
 
+## Search reliability and interpreting zero results
+
+Reports include a **Run Summary** worksheet and show **Search incomplete** when
+queries remain unfinished, an employer source fails, or no online source was checked.
+The summary records queries planned/attempted/completed, pending work, employer
+sources reached, unique candidates, reviews, decision counts, reasons and promising
+leads by source. Search Coverage includes provider attempts. Saved captures retain
+their original dates. Completing planned sources does not imply exhaustive coverage.
+
+Web search uses Brave's supported API when `BRAVE_SEARCH_API_KEY` is present in
+the process environment, with DuckDuckGo HTML as fallback. Without that key,
+DuckDuckGo remains the sole provider. Configure credentials privately in your
+shell/environment; the application does not create accounts or purchase service.
+See [Brave API documentation](https://api-dashboard.search.brave.com/api-reference/web/search/get).
+
+Transient errors receive one retry. Denials, challenges and exhausted budgets are
+not repeatedly retried. Failed providers are disabled for the rest of that run;
+other providers and employer sources continue. Private `pending-queries.json`
+retains unfinished queries. Later runs alternate pending work with fresh queries.
+Query groups and their contents rotate across runs, including title variants,
+industries, boards, employers and Canadian location wording. Web searches use
+approximately 40% of the HTTP budget, reserving the remainder for employer feeds
+and role/application retrieval. A query's retries may cross that threshold.
+
+Employer checks start with public ATS seeds independently of web results. Learned
+boards and careers pages persist in private `learned-boards.json` and
+`learned-careers.json`. Add curated sources to
+`.job-search-assistant-private/search/employer-sources.json`:
+
+```json
+[
+  {"platform": "greenhouse", "board": "clio"},
+  {"url": "https://example.com/careers"}
+]
+```
+
+Supported platforms are greenhouse, lever and ashby. Seeds are starting points,
+not hiring claims; retired boards appear as coverage gaps. Ashby's documented
+public posting endpoint is requested directly as an API integration; its unrelated
+root robots endpoint is not requested first. API errors and redirect checks remain
+enforced. Other crawled pages retain robots checks. See
+[Ashby's public API documentation](https://developers.ashbyhq.com/docs/public-job-posting-api).
+
+Searches show new results only. Previously exported jobs, including Needs
+Verification, are excluded using saved reports and persistent history. Recognized
+URL/ATS aliases are excluded too. Duplicate decisions remain in the private audit
+history and are omitted from new result tabs, CSVs and Markdown listings. Existing
+reports are preserved. Use explicit lead verification to recheck an old report.
+Fit, eligibility and recommendation gates remain unchanged.
+
+## Evaluate discovery recall
+
+Maintain a private reference set of independently found, current, suitable postings
+from several sources. For example, save this JSON under the private search folder:
+
+```json
+[
+  {"url": "https://example.com/jobs/reference-role", "source": "employer careers"}
+]
+```
+
+Run:
+
+```powershell
+.\.venv\Scripts\python.exe -m job_search_assistant search --benchmark-file .job-search-assistant-private/search/reference-postings.json
+```
+
+Private `benchmark-RUN.json` records overall/per-source recall, each hit's filtering
+decision and missed URLs. Recognized ATS aliases count as hits. This measures
+retrieval into the candidate pipeline, including unreported saved leads,
+independently of recommendation qualification. Inspect Search Coverage to investigate
+misses; missing a posting does not establish closure. Refresh references as jobs
+change. Synthetic regression tests check failure handling and matching, but do not
+establish real-world recall. Run manifests retain summary counts for comparison
+across runs.
+
 Run from the project directory containing the sole current application workbook:
 
 ```powershell
@@ -104,8 +180,8 @@ Unresolved employer aliases can still require human reconciliation.
 
 Every discovered URL receives a stored decision and reason. Previously reported,
 rejected and known duplicate vacancies remain excluded on future runs. Unverified
-findings can be retrieved and assessed again; only newly qualified recommendations
-are exported. Only the strongest new recommendation per company is exported by
+findings are retried only if they have never been exported. Previously shown links
+stay excluded even if they still need verification. Only the strongest new recommendation per company is exported by
 default. Earlier decision events and source evidence remain in private history.
 An OS-released file lock prevents overlapping manual/scheduled searches.
 

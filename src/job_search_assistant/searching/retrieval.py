@@ -48,6 +48,13 @@ class PublicClient:
         if crawl_delay > 30: raise FetchError('robots crawl delay exceeds this run pacing budget')
         self.delay = max(self.delay, crawl_delay)
     def get(self,url,json_response=False):
+        # This documented public JSON API is an API integration, not a crawl.
+        # Its unrelated root robots.txt can require authentication even though
+        # posting-api itself is public. Never relax checks for arbitrary pages.
+        import re
+        if json_response and re.fullmatch(r'https://api\.ashbyhq\.com/posting-api/job-board/[A-Za-z0-9_-]+',url):
+            page=self._read(url,('application/json','text/json'),check_redirects=True)
+            return json.loads(page.html)
         self._allowed(url)
         types = ('application/json','text/json') if json_response else ('text/html','application/xhtml+xml')
         page = self._read(url, types, check_redirects=True)
