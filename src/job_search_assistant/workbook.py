@@ -534,7 +534,25 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                 if job.id in ids or normalized in job_urls:
                     raise ValueError("Duplicate existing ID/URL; retained separately for manual reconciliation")
                 raw_status = str(_value(record, "status") or "").strip().casefold()
-                if assessment_service is not None and raw_status in ("", "not applied"):
+                unselected = reassess_rows is not None and record.row not in reassess_rows
+                if unselected and assessment_service is not None and raw_status in ("", "not applied"):
+                    # Targeted runs must not clear another row's result merely
+                    # because preferences changed or its exact cache is missing.
+                    if all(getattr(job.assessment, key) == "unknown" for key in CRITERIA):
+                        preserved = assessment_service.preserved(
+                            job, candidate,
+                            summary=record.values.get("Assistant assessment summary"),
+                            source=record.values.get("Assistant assessment source"),
+                            assessed_on=str(record.values.get("Assistant assessed on") or "")[:10],
+                        )
+                        if preserved is not None:
+                            assessment, historical = preserved
+                            job = replace(job, assessment=assessment)
+                            if historical:
+                                record.flags.append("Unselected assessment preserved from its earlier inputs; no fresh assessment requested. Select this job to refresh it.")
+                        elif record.values.get("Assistant assessment summary"):
+                            record.flags.append("Saved assessment text preserved; its structured ratings could not be validated. Select this job to refresh it before ranking.")
+                if assessment_service is not None and raw_status in ("", "not applied") and not unselected:
                     if record.values.get("Assistant assessment summary"):
                         record.values["Assistant previous assessment summary"] = record.values["Assistant assessment summary"]
                         record.values["Assistant previous assessment date"] = record.values.get("Assistant assessed on")
@@ -557,10 +575,8 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                                 progress(f"{kind} assessment: {job.company} - {job.title}")
                             created_before = assessment_service.created
                             def resolve_current():
-                                if reassess_rows is None:
-                                    return assessment_service.resolve(job, candidate, as_of, offline=offline)
-                                selected = record.row in reassess_rows
-                                return assessment_service.resolve(job, candidate, as_of, offline=not selected, force=selected)
+                                return assessment_service.resolve(job, candidate, as_of, offline=offline,
+                                                                  force=reassess_rows is not None)
                             try:
                                 assessment, entry = resolve_current()
                             except AssessmentError:
@@ -630,6 +646,10 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
             section = {"applied": "Applied", "rejected": "Rejected"}.get(raw_status, "Review")
             if ranked:
                 section = "Review" if ranked.job.id in excluded_ids else {"applied": "Applied", "outstanding": "Outstanding", "rejected": "Rejected"}[ranked.job.status]
+            unselected = reassess_rows is not None and record.row not in reassess_rows
+            if (unselected and record.values.get("Assistant assessment summary") and record.job
+                    and all(getattr(record.job.assessment, key) == "unknown" for key in CRITERIA)):
+                section = "Review"
             if raw_status == "interviewing":
                 section = "Interviewing"
             if raw_status == "closed":
@@ -648,14 +668,19 @@ def update_workbook(source: Path, output: Path, urls: list[str], *, as_of: date,
                       "Assistant policy version": ranked.rubric_version if ranked else "1.0"})
             known_criteria = sum(getattr(record.job.assessment, key) != "unknown" for key in
                                  ("leadership_fit", "technical_fit", "career_alignment", "opportunity_quality")) if record.job else 0
-            v["Assistant assessment status"] = ("Complete" if known_criteria == 4 else "Partial" if known_criteria else "Needs assessment")
+            preserve_assessment_fields = (unselected and v.get("Assistant assessment status") is not None
+                                          and not (known_criteria and v.get("Assistant assessment status") == "Needs assessment"))
+            if not preserve_assessment_fields:
+                v["Assistant assessment status"] = ("Complete" if known_criteria == 4 else "Partial" if known_criteria else "Needs assessment")
             issue = str(v.get("Assistant assessment issue") or "")
-            v["Assistant assessment outcome"] = (
+            outcome = (
                 "Saved assessment retained; refresh failed" if issue.startswith("Saved assessment retained") else
                 "Description needed" if "Not enough role evidence" in issue or (
                     not known_criteria and not issue and v.get("Assistant assessment summary")) else
                 "Assessment needed" if not known_criteria and not issue else
                 "Assessment failed" if issue else "Assessed")
+            if not preserve_assessment_fields:
+                v["Assistant assessment outcome"] = outcome
             if raw_status == "elapsed-rejected":
                 v["Assistant priority reasons"] = "Application aged at least one calendar month: Elapsed-Rejected is a tracking assumption, not a confirmed employer rejection."
         source_order = {id(record): i for i, record in enumerate(records)}

@@ -1,8 +1,8 @@
 # Job Search Assistant
 
 **Which job should I apply to next?** A small Python engine orders an existing
-list of opportunities using evidence-backed fit assessments, location eligibility,
-bounded urgency, and explicit manual adjustments. Every result retains its reasons,
+list of opportunities using evidence-backed match assessments, location confidence,
+posting freshness, and explicit manual adjustments. Every result retains its reasons,
 unknowns, original record, and ranking-policy version.
 
 ## Current scope
@@ -12,6 +12,11 @@ that reads posting URLs and exports an updated Excel queue. It preserves the inp
 workbook and original tracking columns. Older workbooks and their tabs go in
 `archive/`; the current workbook contains the Assistant queue and preserves a user-maintained Rejected tab when present. New facts use structured
 posting metadata; contextual fit remains evidence-backed human input.
+Automatic order prioritizes employer-facing leadership and technical match, then
+location confidence and freshness among comparable matches. Closing deadlines are
+warnings, not interview-priority boosts. Personal fit remains visible separately.
+See [the ranking policy](docs/prioritization_rules.md).
+
 Optional automatic resume-based assessment now uses your signed-in Codex CLI;
 a direct OpenAI API provider is also available. Personal resumes, assessments,
 workbooks and snapshots stay in ignored private files. There is no UI.
@@ -29,7 +34,7 @@ python -m venv .venv
 
 On macOS/Linux use `.venv/bin/python` instead. No activation step is needed.
 The example uses fictional companies and `example.com` URLs; it never fetches them.
-The older good-fit opportunity ranks before the newer strong-fit opportunity,
+The newer strong-fit opportunity ranks before the older good-fit opportunity,
 while Interviewing precedes Applied and a confirmed closed job stays outside the queue.
 
 ## Update your workbook from URLs
@@ -154,7 +159,7 @@ career pages. Full fetched HTML and extracted text are retained in private snaps
 
 `python -m pytest` covers status precedence, preserved tracking data, closed jobs,
 duplicates, company overlaps, deterministic ties, posting-age boundaries, deadlines,
-bounded urgency, location restrictions, work authorization, configurable preferences,
+freshness tie-breaks, location restrictions, work authorization, configurable preferences,
 technical gaps, coding preferences, missing data, evidence validation, and manual
 overrides. Workbook and ingestion tests also cover repeat updates, source tabs,
 annotations, duplicate aliases, fetch failures, private-address redirects,
@@ -194,8 +199,8 @@ See [supplied alternate links](docs/updating_workbooks.md#supplied-alternate-pos
 
 
 For fresh AI assessments of selected input-sheet Excel rows, use
-`update --reassess-rows 98,101,103-105`. Other jobs reuse matching assessments
-without new AI calls. See [selected reassessment](docs/automatic_assessment.md#reassess-selected-rows).
+`update --reassess-rows 98,101,103-105`. Other jobs preserve saved assessment fields and reuse validated ratings
+without new AI calls. Missing cache entries do not erase their assessments. See [selected reassessment](docs/automatic_assessment.md#reassess-selected-rows).
 
 
 Use `update --reassess-needed` to retry jobs whose saved **Apply order** is

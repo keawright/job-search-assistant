@@ -12,7 +12,7 @@ def test_unknowns_not_invented_or_declared_unsuitable(make_job, candidate, today
     assert row.location_eligibility == "unknown"
     assert row.job.posting_date is None and row.job.deadline is None
     assert any("unverified" in f for f in row.review_flags)
-    assert any("no posting-age boost" in f for f in row.review_flags)
+    assert any("freshness cannot be established" in f for f in row.review_flags)
 
 
 def test_known_assessment_requires_evidence():

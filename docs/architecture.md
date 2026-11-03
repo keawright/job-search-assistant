@@ -4,8 +4,8 @@ Current extension: `assessment.py` implements optional Codex CLI and direct
 OpenAI Responses providers, grounded-quotation validation, private input-keyed
 assessment reuse, and safe failure handling. CLI loads private resume/configuration
 and passes the service into the workbook adapter. Explicit manual ratings retain
-precedence; the pure ranking library still makes no network calls. Policy 1.1
-makes contextual fit primary; unknown location is a tie-breaker. The historical
+precedence; the pure ranking library still makes no network calls. Policy 1.2
+uses employer-facing match, then location confidence and freshness. The historical
 design notes below describe the earlier implementation; see automatic_assessment.md
 for current runtime behavior.
 
@@ -24,7 +24,7 @@ Existing job records + contextual assessments + candidate preferences
 ```
 
 `models.py` defines the public dataclasses and evidence requirements. `ranking.py`
-handles eligibility, ordinal fit, bounded urgency, manual insertion, and company
+handles eligibility, ordinal fit, interview priority, manual insertion, and company
 review flags. `assessment.py` defines an optional provider protocol. No plugin
 framework or provider implementation is needed to run the engine.
 

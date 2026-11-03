@@ -59,7 +59,7 @@ def _evaluate(job, candidate, policy, as_of):
         fit = _NAMES[band]
         reasons.append("Regular hands-on coding reduces fit by one band under the leadership preference.")
     location, location_reason = _location(job, candidate)
-    if job.assume_location_acceptable and location != "eligible":
+    if job.assume_location_acceptable and location == "unknown":
         flags.append("Location needs checking; assessed and ranked assuming location will be acceptable. " + location_reason)
         location = "assumed acceptable"
         location_reason = "Location assumed acceptable at user request; actual eligibility remains unverified."
@@ -70,16 +70,16 @@ def _evaluate(job, candidate, policy, as_of):
         flags.append("Job availability is unverified; check the official employer page.")
     if job.last_verified and job.last_verified > as_of:
         raise ValueError(f"{job.id}: verification date is after the ranking date")
-    urgency = 0
+    freshness = None
     if job.posting_date:
         age = (as_of - job.posting_date).days
         if age < 0:
             flags.append("Posting date is in the future; verify it.")
-        elif age > policy.old_posting_days:
-            urgency = 1
-            reasons.append(f"Posting is {age} days old (over {policy.old_posting_days}).")
+        else:
+            freshness = age
+            reasons.append(f"Posting is {age} days old; newer postings break comparable-match ties. Posting age does not establish hiring stage.")
     else:
-        flags.append("Posting date unknown; no posting-age boost.")
+        flags.append("Posting date unknown; freshness cannot be established.")
     deadline = job.deadline
     if deadline and deadline < as_of and job.verification == "open" and job.last_verified >= deadline:
         flags.append("Recorded deadline superseded by later confirmation that applications are accepted; original deadline retained.")
@@ -89,24 +89,27 @@ def _evaluate(job, candidate, policy, as_of):
         if remaining < 0:
             flags.append("Recorded deadline has passed; verify availability before applying.")
         elif remaining <= policy.approaching_deadline_days:
-            urgency = 2
-            reasons.append(f"Deadline is in {remaining} days (within {policy.approaching_deadline_days}).")
+            flags.append(f"Closing soon: deadline is in {remaining} days; this warning does not raise interview-priority order.")
     else:
-        flags.append("Deadline unknown; no deadline boost.")
+        flags.append("Deadline unknown.")
     excluded = job.verification == "closed" or location == "ineligible" or fit == "unsuitable" or bool(deadline and deadline < as_of)
     if job.verification == "closed":
         reasons.append("Confirmed closed: excluded from the application queue.")
-    if excluded or band == 0:
-        urgency = 0
-    if urgency:
-        reasons.append("Urgency raises queue position by at most one fit band; it does not change fit.")
     if job.manual_priority is not None:
         reasons.append(f"Manual queue position requested: {job.manual_priority}; eligibility and status still apply.")
     ranked = RankedJob(job, fit, location, None, tuple(reasons), tuple(flags), policy.version, as_of)
-    # Fit drives recommendations. Confirmed ineligibility still excludes a job;
-    # unknown location stays flagged and breaks comparable-fit ties only.
-    key = (not bool(known), -(band + bool(urgency)), -urgency,
-           "unknown" in values, -band, location not in ("eligible", "assumed acceptable"), job.deadline or date.max, job.id)
+    # Employer-facing match is separate from personal appeal / coding preference.
+    employer_values = [assessment.leadership_fit, assessment.technical_fit]
+    employer_known = [_BANDS[v] for v in employer_values if v != "unknown"]
+    employer_band = min(employer_known, default=0)
+    if any(g.severity == "major" for g in assessment.gaps):
+        employer_band = min(employer_band, 1)
+    reasons.append("Interview priority uses leadership and technical/domain match, then location confidence and freshness; it is not an interview probability.")
+    ranked = replace(ranked, reasons=tuple(reasons))
+    key = (not bool(employer_known), -employer_band,
+           "unknown" in employer_values, -sum(employer_known),
+           location != "eligible", freshness is None, freshness if freshness is not None else 0,
+           job.id)
     return ranked, key, excluded
 
 
@@ -157,7 +160,7 @@ def prioritize(jobs: list[Job], candidate: CandidatePreferences, *, as_of: date,
         flags = r.review_flags
         peers = groups[r.job.company.strip().casefold()]
         if len(peers) > 1:
-            # Best fit ignores urgency and manual queue adjustments.
+            # Best personal fit is separate from interview priority and manual adjustments.
             fit_order = {"strong": 3, "good": 2, "stretch": 1, "unknown": -1, "unsuitable": 0}
             best = min((x for x in ordered if x.job.id in peers), key=lambda x: (-fit_order[x.overall_fit], x.location_eligibility != "eligible", x.job.id))
             flags += (f"Overlapping company opportunities: {', '.join(peers)}. Best assessed fit: {best.job.id} ({best.overall_fit}); review before multiple applications.",)

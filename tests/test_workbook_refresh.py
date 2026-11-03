@@ -245,17 +245,15 @@ def test_supplied_links_mismatch_stays_unverified(tmp_path):
     assert "did not verify" in row["Assistant discovery notes"]
 
 
-def test_location_hold_is_assessed_ranked_and_flagged(tmp_path):
+def test_explicit_incompatible_location_is_held_for_review(tmp_path):
     original, output = tmp_path / "input.xlsx", tmp_path / "output.xlsx"
     source(original, ("Can work from Halifax?", "Leadership fit", "Assessment evidence", "Working arrangement", "Office city", "Location evidence"),
            ("No - Toronto office required", "good", "Comparable SaaS engineering team leadership.", "hybrid", "Toronto", "Office attendance in Toronto required."))
     update_workbook(original, output, [], as_of=TODAY, offline=True)
     row = get_values(output)
-    assert row["Assistant section"] == "Outstanding"
-    assert row["Apply order"] == 1
-    assert row["Assistant location eligibility"] == "assumed acceptable"
-    assert "Location needs checking" in row["Assistant review flags"]
-    assert "Toronto office required" in row["Assistant review flags"]
+    assert row["Assistant section"] == "Review"
+    assert row["Apply order"] == "Needs review"
+    assert row["Assistant location eligibility"] == "ineligible"
     assert row["Can work from Halifax?"] == "No - Toronto office required"
 
 

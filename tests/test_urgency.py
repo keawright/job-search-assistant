@@ -5,15 +5,15 @@ import pytest
 from job_search_assistant import RankingPolicy, prioritize
 
 
-@pytest.mark.parametrize("age,first", [(14, "strong"), (15, "older")])
-def test_age_threshold_can_promote_slightly_weaker_fit(make_job, candidate, today, age, first):
+@pytest.mark.parametrize("age,first", [(14, "strong"), (15, "strong"), (60, "strong")])
+def test_old_postings_never_promote_weaker_match(make_job, candidate, today, age, first):
     result = prioritize([make_job("strong"), make_job("older", fit="good", posting_date=today-timedelta(days=age))], candidate, as_of=today)
     assert result.outstanding[0].job.id == first
     assert next(r for r in result.outstanding if r.job.id == "older").overall_fit == "good"
 
 
-def test_deadline_outranks_posting_age_at_equal_fit(make_job, candidate, today):
-    result = prioritize([make_job("old", posting_date=today-timedelta(days=30)), make_job("deadline", deadline=today+timedelta(days=2))], candidate, as_of=today)
+def test_freshness_outranks_deadline_at_equal_fit(make_job, candidate, today):
+    result = prioritize([make_job("old", posting_date=today-timedelta(days=30)), make_job("deadline", posting_date=today, deadline=today+timedelta(days=2))], candidate, as_of=today)
     assert result.outstanding[0].job.id == "deadline"
 
 
@@ -33,5 +33,5 @@ def test_passed_deadline_held_for_review_not_marked_closed(make_job, candidate, 
 def test_configurable_window_and_future_posting(make_job, candidate, today):
     jobs = [make_job("new", posting_date=today+timedelta(days=1)), make_job("old", fit="good", posting_date=today-timedelta(days=5))]
     result = prioritize(jobs, candidate, as_of=today, policy=RankingPolicy(old_posting_days=3))
-    assert result.outstanding[0].job.id == "old"
-    assert any("future" in f for f in result.outstanding[1].review_flags)
+    assert result.outstanding[0].job.id == "new"
+    assert any("future" in f for f in result.outstanding[0].review_flags)

@@ -13,7 +13,7 @@ class CandidatePreferences:
     home_city: str = "Halifax"
     country: str = "Canada"
     remote_countries: tuple[str, ...] = ("Canada",)
-    acceptable_office_cities: tuple[str, ...] = ("Halifax",)
+    acceptable_office_cities: tuple[str, ...] = ("Halifax", "Dartmouth", "Bedford")
     strengths: tuple[str, ...] = ("SaaS", "cloud infrastructure", "engineering leadership", "data platforms", "blockchain infrastructure", "identity and access management", "cross-functional delivery", "organizational change")
     prefer_leadership: bool = True
     willing_to_relocate: bool = False
@@ -117,7 +117,7 @@ class Job:
 
 @dataclass(frozen=True)
 class RankingPolicy:
-    version: str = "1.1"
+    version: str = "1.2"
     old_posting_days: int = 14
     approaching_deadline_days: int = 7
 

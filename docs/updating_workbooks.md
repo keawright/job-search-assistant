@@ -246,16 +246,12 @@ and protected statuses (including Interviewing) never fetch alternate links.
 
 ## Location assumptions
 
-At the user's request, workbook assessments and application ordering assume
-location will be acceptable. Earlier Halifax/location holds no longer prevent
-fit assessment. Actual location evidence and original notes remain intact;
-**Assistant review flags** warns that location needs checking, and
-**Assistant location eligibility** says **assumed acceptable** where applicable.
-This is a ranking assumption, not verified permission to work remotely or an
-employer waiver. Availability, duplicate, and insufficient-role-evidence holds
-still apply. The standalone ranking library retains its normal location checks
-unless a job explicitly enables this assumption.
-
+Workbook assessments retain unclear locations, with visible warnings and lower
+interview priority than comparable matches with confirmed eligibility. An assumed
+location is not employer permission. Explicit relocation, incompatible office
+attendance or country restrictions remain review holds even when a legacy workbook
+assumes location is acceptable. Original location notes remain intact. Default
+acceptable offices are Halifax, Dartmouth and Bedford; relocation is disabled.
 
 ## CGI future opportunities and renewed availability
 

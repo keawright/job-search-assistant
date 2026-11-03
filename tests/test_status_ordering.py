@@ -41,10 +41,10 @@ def test_query_distinguishes_postings(make_job, candidate, today):
     assert len(result.outstanding) == 2
 
 
-def test_same_company_flag_identifies_best_fit_independent_of_urgency(make_job, candidate, today):
+def test_same_company_flag_identifies_best_fit_with_freshness_ordering(make_job, candidate, today):
     from datetime import timedelta
     result = prioritize([make_job("weaker", fit="good", posting_date=today-timedelta(days=20)), make_job("stronger")], candidate, as_of=today)
-    assert result.outstanding[0].job.id == "weaker"
+    assert result.outstanding[0].job.id == "stronger"
     assert all(any("Best assessed fit: stronger" in flag for flag in r.review_flags) for r in result.outstanding)
 
 

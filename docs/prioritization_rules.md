@@ -1,4 +1,4 @@
-# Prioritization policy 1.1
+# Prioritization policy 1.2
 
 All rules are deterministic for the same inputs, policy, and explicit `as_of` date.
 Dates are calendar dates. Unknown values remain unknown. These ordinal rules are
@@ -59,38 +59,45 @@ Every identified gap must include evidence and a severity judgment.
 rule. Changing one does not silently rewrite the other. Work authorization defaults
 to unknown; callers should record known held or unavailable authorizations.
 
-## Urgency and automatic ordering
+## Interview priority and automatic ordering
 
-Internally the fit bands have ordinal levels strong=3, good=2, stretch=1,
-unsuitable=0. These are sorting levels, not public numerical fit scores.
-
-- A known posting age **greater than** 14 days triggers age urgency (level 1).
-- A known deadline from today through seven days away triggers deadline urgency
-  (level 2). Deadline urgency takes precedence over age urgency.
-- Either trigger can raise queue sorting by **one** fit band maximum; triggers
-  never stack. The recorded fit assessment does not change.
-- Unknown dates add no urgency. Future posting dates are flagged and receive no
-  age boost. Entirely unassessed and excluded jobs receive no urgency boost.
+The queue estimates relative interview prospects using evidence, not numerical
+interview probabilities or knowledge of unseen competitors. There is one ranked
+list without a weekly application quota.
 
 Sort actionable Outstanding by:
 
-1. At least one known contextual criterion before entirely unassessed records.
-2. Fit band plus bounded urgency, descending.
-3. Urgency level, descending (deadline before age before none).
-4. Complete assessments before partial assessments.
-5. Original fit band, descending.
-6. Confirmed location eligibility before unknown eligibility for otherwise comparable fits.
-7. Earliest known deadline; then stable ID.
+1. Known leadership or technical/domain match before entirely unknown employer match.
+2. Weakest known leadership/technical match, descending; major gaps cap it at stretch.
+3. Complete employer-match evidence before partial evidence.
+4. Combined leadership/technical strength, descending, to distinguish comparable bands.
+5. Confirmed location eligibility before unknown or assumed eligibility.
+6. Known, nonfuture original posting dates before unknown/future dates, newest first.
+7. Stable job ID for reproducibility.
 
-Example: older good fit (2+1) precedes new strong fit (3+0), because urgency
-breaks the equal effective band. Urgent stretch (1+1) stays below new strong (3).
-Unknown location is flagged for verification; it does not by itself push a strong
-fit below a weak one. Confirmed location ineligibility still excludes the job.
-An older posting may already be stale, so age urgency is paired with availability
-review flags rather than an invented closure prediction.
+Career alignment, opportunity quality and coding preference remain visible in
+personal overall fit, rather than promoting a role's interview priority. Existing
+unsuitable/fundamental-gap exclusions remain. Ratings are evidence-based judgments;
+no candidate-pool size, hiring stage, referral or recruiter interest is invented.
 
-Thresholds are configurable through `RankingPolicy`. A material rule change should
-receive a new policy version and regression tests.
+Posting age breaks comparable-match ties. It never promotes weaker matches just
+because they are older. Unknown/future dates receive no freshness advantage, and
+future dates are flagged. A posting date is not proof that interviewing has or has
+not begun; reposts and last-update dates should not replace original publication.
+
+Deadlines within the configured warning window display Closing soon; they do not
+boost interview priority. Passed deadlines retain the existing review checks.
+`old_posting_days` remains accepted for compatibility but no longer changes order.
+
+Unknown locations stay available and rank below confirmed eligibility among
+comparable matches. Workbook location assumptions never override explicit
+ineligibility. Default local offices include Halifax, Dartmouth and Bedford;
+relocation remains disabled. Explicit remote Canada eligibility does not resolve
+unrepresented province restrictions; record such restrictions when known.
+
+Policy version 1.2 replaces the historical old-posting urgency promotion. For
+example, a new strong match precedes an old good match, and a newer strong match
+precedes an older equally strong match when location confidence is equal.
 
 ## Manual ordering, duplicates, and overlapping roles
 
@@ -108,7 +115,7 @@ aggregator alias, tracking-parameter variant, or same-job alternate URL; those
 require future reconciliation. URLs are validated but never fetched.
 
 Flag multiple actionable opportunities at the same company (case-insensitive exact
-company name), and identify the strongest assessed fit independent of urgency and
+company name), and identify the strongest assessed fit independent of interview priority and
 manual queue changes. Resolve equal fits by confirmed location then stable ID.
 This is a review recommendation, not an instruction to apply to every position;
 company aliases and partially unknown assessments still need human review.

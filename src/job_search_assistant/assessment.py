@@ -271,6 +271,44 @@ class AssessmentService:
         temporary.replace(path)
         return entry
 
+    def preserved(self, job, candidate, *, summary=None, source=None, assessed_on=None):
+        """Read an unselected row's validated result without requesting a refresh.
+
+        Legacy workbook rows do not contain criterion ratings. Recover the exact
+        displayed assessment from history when preferences changed its cache key;
+        never select an arbitrary latest assessment or infer ratings from prose.
+        """
+        key = assessment_key(job, candidate, self.resume)
+        current = self.folder / "assessments" / f"{key}.json"
+        paths = [current] if current.exists() else []
+        if summary and source and assessed_on:
+            paths += [p for p in (self.folder / "assessments").glob("*.json") if p != current]
+        matches = []
+        for path in paths:
+            try:
+                entry = json.loads(path.read_text(encoding="utf-8"))
+                if entry.get("version") != VERSION or entry.get("job_id") != job.id:
+                    continue
+                matching = entry.get("key") == key
+                linked = (
+                    entry.get("source") == source and entry.get("assessed_on") == assessed_on
+                    and entry.get("assessment", {}).get("summary") == summary
+                )
+                if (summary and not linked) or (not matching and not linked):
+                    continue
+                rating = validate_assessment(entry["assessment"], self.resume, job_evidence(job))
+                if matching:
+                    self.reused += 1
+                    return rating, False
+                matches.append((rating, entry["assessment"]))
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                continue
+        # Multiple revisions with the same display metadata must agree in full.
+        if matches and all(payload == matches[0][1] for _, payload in matches):
+            self.reused += 1
+            return matches[0][0], True
+        return None
+
     def resolve(self, job, candidate, as_of, *, offline=False, force=False):
         key = assessment_key(job, candidate, self.resume)
         path = self.folder / "assessments" / f"{key}.json"

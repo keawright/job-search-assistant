@@ -24,7 +24,9 @@ for ($i = 0; $i -lt $doc.PageCount; $i++) {
     $stream = [Windows.Storage.Streams.InMemoryRandomAccessStream]::new()
     try {
         $options = [Windows.Data.Pdf.PdfPageRenderOptions]::new()
-        $options.DestinationWidth = 1800
+        # Some browser-exported pages stall Windows OCR at 1800px. Rendering
+        # at 1200px retains readable role text without that recognition hang.
+        $options.DestinationWidth = 1200
         $action = $page.RenderToStreamAsync($stream, $options)
         $actionMethod = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
             $_.Name -eq 'AsTask' -and -not $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and

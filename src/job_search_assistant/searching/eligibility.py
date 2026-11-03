@@ -24,8 +24,8 @@ def location_gate(text, location=''):
         return 'ineligible', 'Required attendance outside Halifax'
     if re.search(r'remote.{0,25}(?:ontario|british columbia|quebec).{0,15}only|only.{0,60}(?:ontario|british columbia|qu(?:e|\u00e9)bec)|must be based in (?:either )?(?:alberta|british columbia|ontario).{0,100}aren.t able to hire', text):
         return 'ineligible', 'Remote restricted to other provinces'
-    if 'halifax' in text and re.search(r'on.?site|hybrid',text):
-        return 'eligible', 'Halifax attendance allowed'
+    if re.search(r'\b(?:halifax|dartmouth|bedford)\b',text) and re.search(r'on.?site|hybrid',text):
+        return 'eligible', 'Halifax-area attendance allowed'
     if re.search(r'anywhere (?:in|within|across) canada|all (?:canadian )?provinces|remote.{0,25}canada|canada.{0,25}remote', text):
         # A remote city-specific label alone cannot establish nationwide hiring.
         if re.search(r'remote.{0,15}(?:ontario|toronto|vancouver|montreal|ottawa)|(?:toronto|vancouver).{0,12}remote', location.casefold()):

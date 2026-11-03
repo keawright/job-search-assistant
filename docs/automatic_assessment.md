@@ -112,9 +112,10 @@ Only Not Applied and blank-status jobs enter automatic assessment. Applied, Clos
 Rejected, Elapsed-Rejected, Interviewing and other manual statuses never trigger
 model requests. Vacancy/data exclusions remain held for review, except CGI future opportunities
 which are assessed with an explicit caveat.
-Assessment itself never changes status or infers vacancy availability. Policy 1.1
-orders by contextual fit with bounded urgency; workbook ranking assumes acceptable location with visible warnings. Standalone
-library ranking retains location exclusions unless explicitly overridden. See the prioritization policy.
+Assessment itself never changes status or infers vacancy availability. Policy 1.2
+orders by employer-facing match, location confidence and freshness. Unknown locations
+remain visible with warnings; explicit incompatible locations remain review holds.
+Personal fit is shown separately from interview priority. See the prioritization policy.
 
 ## Optional direct API provider
 
@@ -142,8 +143,15 @@ input sheet (including the header when counting, so jobs start at row 2):
 Comma-separated row numbers and inclusive ranges are supported. Inspect the
 specified workbook before choosing rows: output sorting changes row numbers.
 Use `--sheet` if selecting a sheet other than the default Assistant queue.
-Only selected rows can trigger AI calls; other jobs reuse matching saved
-assessments or remain unassessed if none match. Only selected existing jobs have posting pages refreshed; unselected evidence
+Only selected rows can trigger AI calls. Unselected jobs retain their saved
+assessment fields, including summary, source, date, evidence and existing issues.
+Matching saved ratings are reused without refresh. If preferences changed the cache
+key, the exact displayed result may be recovered from history by stable job ID,
+source, date and summary; quotations are revalidated and earlier inputs are flagged.
+Ambiguous or invalid history is never treated as a fresh assessment: the saved text
+is retained with a review hold when structured ratings cannot be recovered.
+Unassessed unselected jobs stay unassessed without a new disabled-AI error.
+Only selected existing jobs have posting pages refreshed; unselected evidence
 is retained so its assessment cache is not invalidated. Archival still runs. This option does not bypass missing role evidence,
 duplicates, vacancy/deadline review holds, or manually supplied criterion ratings.
 Protected application statuses and nonexistent rows are rejected before fetching.

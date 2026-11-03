@@ -227,7 +227,7 @@ def test_selected_rows_force_only_selected_assessments(tmp_path, payload):
     wb=load_workbook(output);data=list(wb['Assistant queue'].values)
     rows=[dict(zip(data[0],r)) for r in data[1:]];wb.close()
     assert sum(isinstance(r['Apply order'],int) for r in rows)==2
-    assert any('disabled' in str(r['Assistant assessment issue']) for r in rows)
+    assert not any('disabled' in str(r['Assistant assessment issue']) for r in rows)
 
 
 @pytest.mark.parametrize('selection', ['1','3-2','abc','2-3-4','2,','1048577'])
@@ -440,3 +440,98 @@ def test_workbook_failed_refresh_distinguishes_valid_cache_from_history(tmp_path
         assert isinstance(values["Apply order"], int)
         assert values["Assistant assessment outcome"] == "Saved assessment retained; refresh failed"
         assert values["Assistant assessment summary"] == payload["summary"]
+
+
+@pytest.mark.parametrize('mode', ['rows', 'needed'])
+@pytest.mark.parametrize('history', ['matching', 'changed_preferences', 'missing', 'invalid'])
+def test_targeted_runs_preserve_unselected_assessments_across_repeated_exports(tmp_path, payload, mode, history):
+    source = tmp_path/'source.xlsx'
+    wb = Workbook(); ws = wb.active; ws.title = 'Assistant queue'
+    ws.append(['Company', 'Position title', 'Job posting', 'Application status',
+               'Assistant description', 'My notes'])
+    for name in ['Keep', 'Refresh']:
+        ws.append([name, 'Engineering Manager', f'https://example.com/{name}',
+                   'Not applied', DESCRIPTION, 'User note'])
+    wb.save(source); wb.close()
+
+    class Provider:
+        name, model = 'Synthetic', 'test'
+        def __init__(self): self.urls = []
+        def assess(self, resume, context, candidate):
+            self.urls.append(context['url']); return deepcopy(payload)
+    provider = Provider()
+    folder = tmp_path/'private'
+    service = AssessmentService(folder, RESUME, provider)
+    from job_search_assistant.ingestion import FetchError
+    def blocked(url): raise FetchError('Synthetic unavailable page')
+    first = tmp_path/'first.xlsx'
+    update_workbook(source, first, [], as_of=TODAY, fetcher=blocked, assessment_service=service)
+
+    def rows(path):
+        workbook = load_workbook(path); data = list(workbook['Assistant queue'].values)
+        result = {r[0]: dict(zip(data[0], r)) for r in data[1:]}
+        workbook.close(); return result
+    before = rows(first)['Keep']
+    if history in ('missing', 'invalid'):
+        for path in (folder/'assessments').glob('*.json'):
+            entry = json.loads(path.read_text())
+            if entry['job_id'] == before['Assistant ID']:
+                if history == 'missing': path.unlink()
+                else:
+                    entry['assessment']['technical_fit']['job_quote'] = 'Unsupported invented quote'
+                    path.write_text(json.dumps(entry))
+    candidate = replace(CandidatePreferences(), prefer_leadership=False) if history == 'changed_preferences' else CandidatePreferences()
+    provider.urls.clear()
+    current = first
+    for iteration in range(2):
+        # Select by current row position, even after ranking reorders the sheet.
+        workbook = load_workbook(current); sheet = workbook['Assistant queue']
+        headers = [c.value for c in sheet[1]]
+        company_col = headers.index('Company')+1
+        refresh_row = next(i for i in range(2, sheet.max_row+1) if sheet.cell(i, company_col).value == 'Refresh')
+        if mode == 'needed':
+            sheet.cell(refresh_row, headers.index('Apply order')+1).value = 'Needs assessment'
+            workbook.save(current)
+        workbook.close()
+        output = tmp_path/f'output-{iteration}.xlsx'
+        service = AssessmentService(folder, RESUME, provider)
+        kwargs = {'reassess_rows': {refresh_row}} if mode == 'rows' else {'reassess_needed': True}
+        update_workbook(current, output, [], as_of=TODAY, fetcher=blocked,
+                        assessment_service=service, candidate=candidate, **kwargs)
+        kept = rows(output)['Keep']
+        for field in ['Application status', 'My notes', 'Assistant ID',
+                      'Assistant assessment source', 'Assistant assessed on',
+                      'Assistant assessment summary', 'Assistant assessment evidence',
+                      'Assistant assessment strengths', 'Assistant assessment gaps',
+                      'Assistant assessment uncertainties', 'Assistant assessment issue',
+                      'Assistant assessment status', 'Assistant assessment outcome']:
+            assert kept[field] == before[field], field
+        if history in ('matching', 'changed_preferences'):
+            assert isinstance(kept['Apply order'], int)
+            assert kept['Assistant overall fit'] == 'good'
+        else:
+            assert kept['Apply order'] == 'Needs review'
+            assert 'could not be validated' in kept['Assistant review flags']
+        current = output
+        # For Needs assessment selection, do not select the explicit review hold
+        # on the next iteration: it is a different, intentional refresh request.
+        if mode == 'needed' and history in ('missing', 'invalid'):
+            break
+    assert provider.urls == ['https://example.com/Refresh'] * (1 if mode == 'needed' and history in ('missing', 'invalid') else 2)
+
+
+def test_preserved_history_requires_identity_metadata_and_unambiguous_payload(tmp_path, job, payload):
+    candidate = CandidatePreferences()
+    service = AssessmentService(tmp_path, RESUME)
+    entry = service.save(job, candidate, payload, source='Earlier', assessed_on=TODAY)
+    changed_candidate = replace(candidate, prefer_leadership=False)
+    fields = dict(summary=payload['summary'], source='Earlier', assessed_on=TODAY.isoformat())
+    assert service.preserved(job, changed_candidate, **fields)[1] is True
+    assert service.preserved(replace(job, id='different'), changed_candidate, **fields) is None
+    assert service.preserved(job, changed_candidate, **{**fields, 'source': 'Different'}) is None
+    assert service.preserved(job, changed_candidate, **{**fields, 'assessed_on': '2020-01-01'}) is None
+    assert service.preserved(job, changed_candidate) is None
+    conflicting = deepcopy(entry)
+    conflicting['assessment']['technical_fit']['rating'] = 'stretch'
+    (tmp_path/'assessments'/'conflicting.json').write_text(json.dumps(conflicting))
+    assert service.preserved(job, changed_candidate, **fields) is None
